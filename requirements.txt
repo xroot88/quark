@@ -4,7 +4,6 @@ oslo.config>=1.2.0
 oslo.db
 zope.sqlalchemy
 mysql-python
-http://tarballs.openstack.org/neutron/neutron-master.tar.gz#egg=neutron
 aiclib
 gunicorn
 pymysql>=0.6.2
