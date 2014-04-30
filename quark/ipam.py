@@ -97,7 +97,8 @@ class QuarkIpam(object):
                     deallocated_mac = db_api.mac_address_find(
                         context, lock_mode=True, reuse_after=reuse_after,
                         deallocated=True, scope=db_api.ONE,
-                        address=mac_address, order_by="address ASC")
+                        address=mac_address,
+                        order_by='model.MacAddress.address ASC')
                     if deallocated_mac:
                         return db_api.mac_address_update(
                             context, deallocated_mac, deallocated=False,
@@ -196,7 +197,7 @@ class QuarkIpam(object):
             "network_id": net_id, "reuse_after": reuse_after,
             "deallocated": True, "scope": db_api.ONE,
             "ip_address": ip_address, "lock_mode": True,
-            "version": version, "order_by": "address"}
+            "version": version, "order_by": models.IPAddress.address}
 
         if sub_ids:
             ip_kwargs["subnet_id"] = sub_ids
@@ -235,7 +236,10 @@ class QuarkIpam(object):
                                 return [updated_address]
                             else:
                                 # Make sure we never find it again
+                                continue
                                 context.session.delete(address)
+                                context.session.flush()
+                                context.session.expunge()
                     else:
                         break
             except Exception:
@@ -342,7 +346,7 @@ class QuarkIpam(object):
                 continue
 
             address = None
-            if int(subnet["ip_version"]) == 4:
+            if subnet["ip_version"] == 4:
                 address = self._allocate_from_subnet(context, net_id,
                                                      subnet, port_id,
                                                      ip_address, **kwargs)
@@ -427,7 +431,7 @@ class QuarkIpam(object):
         for addr in port["ip_addresses"]:
             if "ip_address" in kwargs:
                 ip = kwargs["ip_address"]
-                if ip != netaddr.IPAddress(int(addr["address"])):
+                if ip != addr["address"]:
                     continue
 
             # Note: only deallocate ip if this is the

@@ -13,6 +13,8 @@
 # License for the specific language governing permissions and limitations
 #  under the License.
 
+import netaddr
+
 from quark.db import custom_types
 
 from quark.tests import test_base
@@ -40,24 +42,28 @@ class TestDBCustomTypesINET(test_base.TestBase):
         self.assertIsNone(bind)
 
     def test_process_bind_param_with_value(self):
-        bind = self.inet.process_bind_param("foo", sqlite.dialect())
-        self.assertEqual(bind, "foo")
+        addr = netaddr.IPAddress('192.168.0.1')
+        bind = self.inet.process_bind_param(str(addr), sqlite.dialect())
+        self.assertEqual(bind, addr.ipv6().value)
 
     def test_process_bind_param_with_value_not_sqlite(self):
-        bind = self.inet.process_bind_param("foo", mysql.dialect())
-        self.assertEqual(bind, "foo")
+        addr = netaddr.IPAddress('192.168.0.1')
+        bind = self.inet.process_bind_param(str(addr), mysql.dialect())
+        self.assertEqual(bind, addr.ipv6().value)
 
     def test_process_result_value(self):
         bind = self.inet.process_result_value(None, mysql.dialect())
         self.assertIsNone(bind)
 
     def test_process_result_value_with_value(self):
-        bind = self.inet.process_result_value(1.0, sqlite.dialect())
-        self.assertEqual(bind, 1.0)
+        addr = netaddr.IPAddress('192.168.0.1')
+        bind = self.inet.process_result_value(addr.value, sqlite.dialect())
+        self.assertEqual(bind, addr)
 
     def test_process_result_value_with_value_not_sqlite(self):
-        bind = self.inet.process_result_value(1.0, mysql.dialect())
-        self.assertEqual(bind, 1.0)
+        addr = netaddr.IPAddress('192.168.0.1')
+        bind = self.inet.process_result_value(addr.value, mysql.dialect())
+        self.assertEqual(bind, addr)
 
 
 class TestDBCustomTypesMACAddress(test_base.TestBase):

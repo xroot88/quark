@@ -97,7 +97,7 @@ def _make_subnet_dict(subnet, default_route=None, fields=None):
            "network_id": net_id,
            "ip_version": subnet.get("ip_version"),
            "dns_nameservers": dns_nameservers or [],
-           "cidr": subnet.get("cidr"),
+           "cidr": str(subnet),
            "shared": STRATEGY.is_parent_network(net_id),
            "enable_dhcp": None}
 

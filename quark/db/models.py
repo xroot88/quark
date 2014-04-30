@@ -196,32 +196,41 @@ class Subnet(BASEV2, models.HasId, IsHazTags):
     id = sa.Column(sa.String(36), primary_key=True)
     name = sa.Column(sa.String(255))
     network_id = sa.Column(sa.String(36), sa.ForeignKey('quark_networks.id'))
-    _cidr = sa.Column(sa.String(64), nullable=False)
+    address = sa.Column(custom_types.INET, nullable=False)
+    prefix = sa.Column(sa.Integer, nullable=False)
     tenant_id = sa.Column(sa.String(255), index=True)
     segment_id = sa.Column(sa.String(255), index=True)
-
-    @hybrid.hybrid_property
-    def cidr(self):
-        return self._cidr
-
-    @cidr.setter
-    def cidr(self, val):
-        self._cidr = val
-        preip = netaddr.IPNetwork(val)
-        self.ip_version = preip.version
-        ip = netaddr.IPNetwork(val).ipv6()
-        self.first_ip = ip.first
-        self.last_ip = ip.last
-        self.next_auto_assign_ip = self.first_ip
-
-    @cidr.expression
-    def cidr(cls):
-        return Subnet._cidr
-
     first_ip = sa.Column(custom_types.INET())
     last_ip = sa.Column(custom_types.INET())
     ip_version = sa.Column(sa.Integer())
     next_auto_assign_ip = sa.Column(custom_types.INET())
+
+    @hybrid.hybrid_property
+    def cidr(self):
+        return netaddr.IPNetwork((self.address.value, self.prefix))
+
+    @cidr.setter
+    def cidr(self, value):
+        if not isinstance(value, netaddr.IPNetwork):
+            value = netaddr.IPNetwork(value)
+
+        value = value.ipv6()
+
+        self.address = value[0]
+        self.prefix = value.prefixlen
+        self.first_ip = value[0]
+        self.last_ip = value[-1]
+        self.next_auto_assign_ip = self.first_ip
+
+        if value.is_ipv4_mapped():
+            self.ip_version = 4
+
+        else:
+            self.ip_version = 6
+
+#    @cidr.expression
+#    def cidr(cls):
+#        return Subnet._cidr
 
     allocated_ips = orm.relationship(IPAddress,
                                      primaryjoin='and_(Subnet.id=='
@@ -242,6 +251,22 @@ class Subnet(BASEV2, models.HasId, IsHazTags):
                              sa.ForeignKey("quark_ip_policy.id"))
     # Legacy data
     do_not_use = sa.Column(sa.Boolean(), default=False)
+
+    def __init__(self, *args, **kwargs):
+        cidr = kwargs.pop('cidr', None)
+
+        if cidr is not None:
+            cidr = netaddr.IPNetwork(cidr)
+            kwargs['address'] = cidr[0]
+            kwargs['prefix'] = cidr.prefixlen
+
+        super(Subnet, self).__init__(*args, **kwargs)
+
+    def __str__(self):
+        if self.cidr.is_ipv4_mapped():
+            return str(self.cidr.ipv4())
+
+        return str(self.cidr)
 
 
 port_ip_association_table = sa.Table(
@@ -404,7 +429,42 @@ class IPPolicyCIDR(BASEV2, models.HasId):
     __tablename__ = "quark_ip_policy_cidrs"
     ip_policy_id = sa.Column(sa.String(36), sa.ForeignKey(
         "quark_ip_policy.id", ondelete="CASCADE"))
-    cidr = sa.Column(sa.String(64))
+    address = sa.Column(custom_types.INET, nullable=False)
+    prefix = sa.Column(sa.Integer, nullable=False)
+
+    @hybrid.hybrid_property
+    def cidr(self):
+        return netaddr.IPNetwork((self.address.value, self.prefix))
+
+    @cidr.setter
+    def cidr(self, value):
+        if not isinstance(value, netaddr.IPNetwork):
+            value = netaddr.IPNetwork(value)
+
+        value = value.ipv6()
+
+        self.address = value[0]
+        self.prefix = value.prefixlen
+
+#    @cidr.expression
+#    def cidr(cls):
+#        return Subnet._cidr
+
+    def __init__(self, *args, **kwargs):
+        cidr = kwargs.pop('cidr', None)
+
+        if cidr is not None:
+            cidr = netaddr.IPNetwork(cidr)
+            kwargs['address'] = cidr[0]
+            kwargs['prefix'] = cidr.prefixlen
+
+        super(IPPolicyCIDR, self).__init__(*args, **kwargs)
+
+    def __str__(self):
+        if self.cidr.is_ipv4_mapped():
+            return str(self.cidr.ipv4())
+
+        return str(self.cidr)
 
 
 class Network(BASEV2, models.HasId):

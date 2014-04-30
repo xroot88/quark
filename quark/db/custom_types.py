@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import netaddr
 from sqlalchemy.dialects import sqlite
 from sqlalchemy import types
 
@@ -27,12 +28,25 @@ class INET(types.TypeDecorator):
     def process_bind_param(self, value, dialect):
         if value is None:
             return value
-        return str(value)
+
+        if not isinstance(value, netaddr.IPAddress):
+            value = netaddr.IPAddress(value)
+
+        if value.version == 4:
+            value = value.ipv6()
+
+        return long(value)
 
     def process_result_value(self, value, dialect):
         if value is None:
             return value
-        return long(value)
+
+        value = netaddr.IPAddress(value)
+
+        if value.is_ipv4_mapped():
+            return value.ipv4()
+
+        return value
 
 
 class MACAddress(types.TypeDecorator):
