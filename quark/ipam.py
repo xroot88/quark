@@ -90,7 +90,7 @@ def generate_v6(mac, port_id, cidr):
 
 
 def deallocated(query, model):
-    return query.filter(model.deallocated == True)  # noqa
+    return query.filter(model.deallocated.is_(True))
 
 
 def reuse(query, model, after):
