@@ -87,7 +87,7 @@ def _make_subnet_dict(subnet, default_route=None, fields=None):
 
     def _allocation_pools(subnet):
         ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
-        cidr = netaddr.IPSet([netaddr.IPNetwork(subnet["cidr"])])
+        cidr = netaddr.IPSet([subnet["cidr"]])
         allocatable = cidr - ip_policy_cidrs
         return _pools_from_cidr(allocatable)
 
@@ -181,7 +181,7 @@ def _port_dict(port, fields=None):
 
 def _make_port_address_dict(ip):
     return {"subnet_id": ip.get("subnet_id"),
-            "ip_address": ip.formatted()}
+            "ip_address": str(ip.address)}
 
 
 def _make_port_dict(port, fields=None):
@@ -226,7 +226,7 @@ def _make_ip_dict(address):
     net_id = STRATEGY.get_parent_network(address["network_id"])
     return {"id": address["id"],
             "network_id": net_id,
-            "address": address.formatted(),
+            "address": str(address),
             "port_ids": [port["id"] for port in address["ports"]],
             "device_ids": [port["device_id"] or ""
                            for port in address["ports"]],

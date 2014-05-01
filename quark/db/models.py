@@ -211,12 +211,6 @@ class IPAddress(BASEV2, models.HasId):
     def deallocated(cls):
         return IPAddress._deallocated
 
-    def formatted(self):
-        ip = netaddr.IPAddress(self.address_readable)
-        if self.version == 4:
-            return str(ip.ipv4())
-        return str(ip.ipv6())
-
     def cidr_map(self):
         if self.cidr.is_ipv4_mapped():
             return self.cidr.ipv4()

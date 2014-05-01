@@ -294,7 +294,6 @@ class TestQuarkCreatePort(test_quark_plugin.TestQuarkPlugin):
         mac = dict(address="AA:BB:CC:DD:EE:FF")
         ip = mock.MagicMock()
         ip.get = lambda x, *y: 1 if x == "subnet_id" else None
-        ip.formatted = lambda: "192.168.10.45"
         fixed_ips = [dict(subnet_id=1, ip_address="192.168.10.45")]
         port = dict(port=dict(mac_address=mac["address"], network_id=1,
                               tenant_id=self.context.tenant_id, device_id=2,
@@ -319,7 +318,6 @@ class TestQuarkCreatePort(test_quark_plugin.TestQuarkPlugin):
         mac = dict(address="AA:BB:CC:DD:EE:FF")
         ip = mock.MagicMock()
         ip.get = lambda x: 1 if x == "subnet_id" else None
-        ip.formatted = lambda: "192.168.10.45"
         fixed_ips = [dict()]
         port = dict(port=dict(mac_address=mac["address"], network_id=1,
                               tenant_id=self.context.tenant_id, device_id=2,
