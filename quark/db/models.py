@@ -96,7 +96,7 @@ class CIDRMixin(object):
         return self.cidr
 
     @classmethod
-    def _split_cidr(self, cidr):
+    def _split_cidr(cls, cidr):
         cidr = netaddr.IPNetwork(cidr)
         return cidr[0], cidr.prefixlen
 
