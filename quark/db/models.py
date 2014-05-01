@@ -16,6 +16,7 @@
 import netaddr
 
 import sqlalchemy as sa
+from sqlalchemy import func
 from sqlalchemy import orm
 
 from sqlalchemy.ext import associationproxy
@@ -61,6 +62,54 @@ class QuarkBase(neutron.db.model_base.NeutronBaseV2):
 
 
 BASEV2 = declarative.declarative_base(cls=QuarkBase)
+
+
+class CIDRMixin(object):
+    CIDR_WIDTH = 128
+
+    @hybrid.hybrid_property
+    def cidr(self):
+        return netaddr.IPNetwork((self.address.value, self.prefix))
+
+    @cidr.setter
+    def cidr(self, value):
+        if not isinstance(value, netaddr.IPNetwork):
+            value = netaddr.IPNetwork(value)
+
+        value = value.ipv6()
+
+        self.address = value[0]
+        self.prefix = value.prefixlen
+
+    @hybrid.hybrid_property
+    def last(self):
+        return self.cidr.last
+
+    @last.expression
+    def last(cls):
+        mask = func.pow(2, (cls.CIDR_WIDTH - cls.prefix)) - 1
+        return cls.address.op('|')(mask)
+
+    def cidr_map(self):
+        return self.cidr
+
+    def __init__(self, *args, **kwargs):
+        cidr = kwargs.pop('cidr', None)
+
+        if cidr is not None:
+            cidr = netaddr.IPNetwork(cidr)
+            kwargs['address'] = cidr[0]
+            kwargs['prefix'] = cidr.prefixlen
+
+        super(CIDRMixin, self).__init__(*args, **kwargs)
+
+    def __str__(self):
+        return str(self.cidr_map())
+
+        if self.cidr_is_mapped(self.cidr):
+            return str(self.cidr.ipv4())
+
+        return str(self.cidr)
 
 
 class TagAssociation(BASEV2, models.HasId):
@@ -136,6 +185,7 @@ class IPAddress(BASEV2, models.HasId):
     _deallocated = sa.Column(sa.Boolean())
     # Legacy data
     used_by_tenant_id = sa.Column(sa.String(255))
+    deallocated_at = sa.Column(sa.DateTime(), index=True)
 
     @hybrid.hybrid_property
     def deallocated(self):
@@ -160,7 +210,29 @@ class IPAddress(BASEV2, models.HasId):
             return str(ip.ipv4())
         return str(ip.ipv6())
 
-    deallocated_at = sa.Column(sa.DateTime(), index=True)
+    def cidr_map(self):
+        if self.cidr.is_ipv4_mapped():
+            return self.cidr.ipv4()
+
+        return self.cidr
+
+    def __init__(self, *args, **kwargs):
+        cidr = kwargs.pop('cidr', None)
+
+        if cidr is not None:
+            cidr = netaddr.IPNetwork(cidr)
+            kwargs['address'] = cidr[0]
+            kwargs['prefix'] = cidr.prefixlen
+
+        super(IPPolicyCIDR, self).__init__(*args, **kwargs)
+
+    def __str__(self):
+        return str(self.cidr_map())
+
+        if self.cidr_is_mapped(self.cidr):
+            return str(self.cidr.ipv4())
+
+        return str(self.cidr)
 
 
 class Route(BASEV2, models.HasTenant, models.HasId, IsHazTags):
@@ -178,7 +250,7 @@ class DNSNameserver(BASEV2, models.HasTenant, models.HasId, IsHazTags):
                                                        ondelete="CASCADE"))
 
 
-class Subnet(BASEV2, models.HasId, IsHazTags):
+class Subnet(CIDRMixin, BASEV2, models.HasId, IsHazTags):
     """Upstream model for IPs.
 
     Subnet -> has_many(IPAllocationPool)
@@ -372,12 +444,12 @@ class MacAddress(BASEV2, models.HasTenant):
     orm.relationship(Port, backref="mac_address")
 
 
-class MacAddressRange(BASEV2, models.HasId):
+class MacAddressRange(CIDRMixin, BASEV2, models.HasId):
+    CIDR_WIDTH = 48
+
     __tablename__ = "quark_mac_address_ranges"
-    cidr = sa.Column(sa.String(255), nullable=False)
-    first_address = sa.Column(sa.BigInteger(), nullable=False)
-    last_address = sa.Column(sa.BigInteger(), nullable=False)
-    next_auto_assign_mac = sa.Column(sa.BigInteger(), nullable=False)
+    address = sa.Column(custom_types.MACAddress, nullable=False)
+    prefix = sa.Column(sa.Integer, nullable=False)
     allocated_macs = orm.relationship(MacAddress,
                                       primaryjoin='and_(MacAddressRange.id=='
                                       'MacAddress.mac_address_range_id, '
@@ -425,46 +497,12 @@ class IPPolicy(BASEV2, models.HasId, models.HasTenant):
         return ip_set & netaddr.IPSet([subnet_cidr])
 
 
-class IPPolicyCIDR(BASEV2, models.HasId):
+class IPPolicyCIDR(CIDRMixin, BASEV2, models.HasId):
     __tablename__ = "quark_ip_policy_cidrs"
     ip_policy_id = sa.Column(sa.String(36), sa.ForeignKey(
         "quark_ip_policy.id", ondelete="CASCADE"))
     address = sa.Column(custom_types.INET, nullable=False)
     prefix = sa.Column(sa.Integer, nullable=False)
-
-    @hybrid.hybrid_property
-    def cidr(self):
-        return netaddr.IPNetwork((self.address.value, self.prefix))
-
-    @cidr.setter
-    def cidr(self, value):
-        if not isinstance(value, netaddr.IPNetwork):
-            value = netaddr.IPNetwork(value)
-
-        value = value.ipv6()
-
-        self.address = value[0]
-        self.prefix = value.prefixlen
-
-#    @cidr.expression
-#    def cidr(cls):
-#        return Subnet._cidr
-
-    def __init__(self, *args, **kwargs):
-        cidr = kwargs.pop('cidr', None)
-
-        if cidr is not None:
-            cidr = netaddr.IPNetwork(cidr)
-            kwargs['address'] = cidr[0]
-            kwargs['prefix'] = cidr.prefixlen
-
-        super(IPPolicyCIDR, self).__init__(*args, **kwargs)
-
-    def __str__(self):
-        if self.cidr.is_ipv4_mapped():
-            return str(self.cidr.ipv4())
-
-        return str(self.cidr)
 
 
 class Network(BASEV2, models.HasId):

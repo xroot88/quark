@@ -35,7 +35,7 @@ class INET(types.TypeDecorator):
         if value.version == 4:
             value = value.ipv6()
 
-        return long(value)
+        return value.value
 
     def process_result_value(self, value, dialect):
         if value is None:
@@ -56,3 +56,18 @@ class MACAddress(types.TypeDecorator):
         if dialect.name == 'sqlite':
             return dialect.type_descriptor(sqlite.CHAR)
         return dialect.type_descriptor(self.impl)
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+
+        if not isinstance(value, netaddr.EUI):
+            value = netaddr.EUI(value)
+
+        return value.value
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+
+        return netaddr.EUI(value)

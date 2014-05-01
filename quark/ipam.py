@@ -17,6 +17,7 @@
 Quark Pluggable IPAM
 """
 
+import datetime
 import random
 import uuid
 
@@ -31,6 +32,10 @@ from oslo.config import cfg
 from quark.db import api as db_api
 from quark.db import models
 from quark import exceptions as q_exc
+
+import sqlalchemy as sa
+from sqlalchemy.sql import func
+
 
 LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
@@ -82,6 +87,176 @@ def generate_v6(mac, port_id, cidr):
     yield rfc2462_ip(mac, cidr)
     for addr in rfc3041_ip(port_id, cidr):
         yield addr
+
+
+def deallocated(query, model):
+    return query.filter(model.deallocated == True)  # noqa
+
+
+def reuse(query, model, after):
+    reuse = (timeutils.utcnow() -
+             datetime.timedelta(seconds=after))
+    return query.filter(model.deallocated_at <= reuse)
+
+
+# NOTE(jkoelker) Mac Address Allocation Functions
+def _reallocate_mac_address(context, net_id, reuse_after, mac_address):
+    # TODO(jkoelker) handle per net_id mac ranges
+    with context.session.begin():
+        query = context.session.query(models.MacAddress)
+        query = deallocated(query, models.MacAddress)
+
+        if reuse_after:
+            query = reuse(query, models.MacAddress, reuse_after)
+
+        if mac_address:
+            query = query.filter(models.MacAddress.address == mac_address)
+
+        query = query.order_by(sa.asc(models.MacAddress.address))
+        query = query.limit(1)
+
+        deallocated_mac = query.first()
+
+        if deallocated_mac:
+            deallocated_mac['deallocated'] = False
+            deallocated_mac['deallocated_at'] = None
+            return deallocated_mac
+
+
+def _allocate_new_mac_address(context, net_id):
+    # TODO(jkoelker) handle per net_id mac ranges
+    with context.session.begin():
+        query = context.session.query(models.MacAddressRanges)
+        query = query.limit(1)
+        query = query.with_lockmode('update')
+
+        mac_address_range = query.first()
+
+        max_address = func.mac(models.MacAddress.address)
+        query = context.session.query(max_address.label('last_address'))
+        query = query.filter(models.MacAddress.mac_address_range_id ==
+                             mac_address_range['id'])
+        last_address = query.one().last_address
+
+        mask = (1 << (48 - mac_address_range['prefix'])) - 1
+        range_last_address = mac_address_range['address'] | mask
+
+        if last_address <= range_last_address:
+            kwargs = {'address': last_address + 1,
+                      'mac_address_range_id': mac_address_range['id'],
+                      'tenant_id': context.tenant_id,
+                      'deallocated': False,
+                      'deallocated_at': None}
+            mac_address = models.MacAddress(**kwargs)
+            context.session.add(mac_address)
+            return mac_address
+
+    # NOTE(jkoelker) Out of addresses
+    raise exceptions.MacAddressGenerationFailure(net_id=net_id)
+
+
+def _allocate_mac_address(context, net_id, reuse_after, mac_address=None):
+    if mac_address:
+        mac_address = netaddr.EUI(mac_address)
+
+    reallocated_mac = _reallocate_mac_address(context, net_id, reuse_after,
+                                              mac_address)
+
+    if reallocated_mac:
+        return reallocated_mac
+
+    # TODO(jkoelker) handle first time requested address allocation
+    if mac_address:
+        LOG.error('Requested mac address not supported on new allocation')
+        raise exceptions.MacAddressGenerationFailure(net_id=net_id)
+
+    return _allocate_new_mac_address(context, net_id)
+
+
+def allocate_mac_address(self, context, net_id, port_id, reuse_after,
+                         mac_address=None):
+    address = _allocate_mac_address(context, net_id, reuse_after,
+                                    mac_address)
+    # NOTE(jkoelker) Requested addresses get 1 shot either you get it
+    #                or you don't
+    if mac_address is not None:
+        return _allocate_mac_address(context, net_id, reuse_after,
+                                     mac_address)
+
+    for retry in xrange(cfg.CONF.QUARK.mac_address_retry_max):
+        address = _allocate_mac_address(context, net_id, reuse_after,
+                                        mac_address)
+        if address is not None:
+            return address
+
+    raise exceptions.MacAddressGenerationFailure(net_id=net_id)
+
+
+def deallocate_mac_address(self, context, address):
+    mac = db_api.mac_address_find(context, address=address,
+                                  scope=db_api.ONE)
+    if not mac:
+        raise exceptions.NotFound(
+            message="No MAC address %s found" % netaddr.EUI(address))
+    db_api.mac_address_update(context, mac, deallocated=True,
+                              deallocated_at=timeutils.utcnow())
+
+
+# NOTE(jkoelker) IPv4 Address Allocation Functions
+def _reallocate_v4_address(context, net_id, reuse_after, segment_id,
+                           address):
+    with context.session.begin():
+        query = context.session.query(models.IPAddress)
+        query = deallocated(query, models.IPAddress)
+
+        query = query.filter(models.IPAddress['subnet_id'] ==
+                             models.Subnet['id'])
+        query = query.filter(models.Subnet['network_id'] ==
+                             models.Network['id'])
+        query = query.filter(models.Network['id'] == net_id)
+
+        if segment_id:
+            query = query.filter(models.Subnet.segment_id == segment_id)
+
+        if reuse_after:
+            query = reuse(query, models.IPAddress, reuse_after)
+
+        if address:
+            query = query.filter(models.IPAddress.address == address)
+
+        query = query.order_by(sa.asc(models.IPAddress.address))
+        query = query.limit(1)
+
+        deallocated_ip = query.first()
+
+        if deallocated_ip:
+            deallocated_ip['deallocated'] = False
+            deallocated_ip['deallocated_at'] = None
+            deallocated_ip['used_by_tenant_id'] = context.tenant_id
+            return deallocated_ip
+
+
+def _allocate_v4_address(context, net_id, port_id, reuse_after,
+                         mac_address=None):
+    pass
+
+
+# NOTE(jkoelker) IPv6 Address Allocation Functions
+
+
+# NOTE(jkoelker) IP Address Allocation Functions
+def allocate_ip_address(self, context, new_addresses, net_id, port_id,
+                        reuse_after, segment_id=None, version=None,
+                        ip_address=None, subnets=None, **kwargs):
+    pass
+
+
+def deallocate_ip_address(self, context, address):
+    pass
+
+
+def deallocate_ips_by_port(self, context, port=None, **kwargs):
+    pass
 
 
 class QuarkIpam(object):
