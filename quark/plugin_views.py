@@ -181,7 +181,7 @@ def _port_dict(port, fields=None):
 
 def _make_port_address_dict(ip):
     return {"subnet_id": ip.get("subnet_id"),
-            "ip_address": str(ip.address)}
+            "ip_address": str(ip)}
 
 
 def _make_port_dict(port, fields=None):

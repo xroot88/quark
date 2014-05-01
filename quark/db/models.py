@@ -113,11 +113,6 @@ class CIDRMixin(object):
     def __str__(self):
         return str(self.cidr_map())
 
-        if self.cidr_is_mapped(self.cidr):
-            return str(self.cidr.ipv4())
-
-        return str(self.cidr)
-
 
 class TagAssociation(BASEV2, models.HasId):
     __tablename__ = "quark_tag_associations"
@@ -216,6 +211,9 @@ class IPAddress(BASEV2, models.HasId):
             return self.cidr.ipv4()
 
         return self.cidr
+
+    def __str__(self):
+        return str(self.address)
 
 
 class Route(BASEV2, models.HasTenant, models.HasId, IsHazTags):
