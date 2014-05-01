@@ -93,13 +93,18 @@ class CIDRMixin(object):
     def cidr_map(self):
         return self.cidr
 
+    @classmethod
+    def _split_cidr(self, cidr):
+        cidr = netaddr.IPNetwork(cidr)
+        return cidr[0], cidr.prefixlen
+
     def __init__(self, *args, **kwargs):
         cidr = kwargs.pop('cidr', None)
 
         if cidr is not None:
-            cidr = netaddr.IPNetwork(cidr)
-            kwargs['address'] = cidr[0]
-            kwargs['prefix'] = cidr.prefixlen
+            address, prefix = self._split_cidr(cidr)
+            kwargs['address'] = address
+            kwargs['prefix'] = prefix
 
         super(CIDRMixin, self).__init__(*args, **kwargs)
 
@@ -215,24 +220,6 @@ class IPAddress(BASEV2, models.HasId):
             return self.cidr.ipv4()
 
         return self.cidr
-
-    def __init__(self, *args, **kwargs):
-        cidr = kwargs.pop('cidr', None)
-
-        if cidr is not None:
-            cidr = netaddr.IPNetwork(cidr)
-            kwargs['address'] = cidr[0]
-            kwargs['prefix'] = cidr.prefixlen
-
-        super(IPPolicyCIDR, self).__init__(*args, **kwargs)
-
-    def __str__(self):
-        return str(self.cidr_map())
-
-        if self.cidr_is_mapped(self.cidr):
-            return str(self.cidr.ipv4())
-
-        return str(self.cidr)
 
 
 class Route(BASEV2, models.HasTenant, models.HasId, IsHazTags):
@@ -455,6 +442,22 @@ class MacAddressRange(CIDRMixin, BASEV2, models.HasId):
                                       'MacAddress.mac_address_range_id, '
                                       'MacAddress.deallocated!=1)',
                                       backref="mac_address_range")
+
+    @classmethod
+    def _split_cidr(cls, cidr):
+        if isinstance(cidr, (tuple, list)):
+            return netaddr.EUI(cidr[0]), cidr[1]
+
+        address, prefix = cidr.split('/')
+
+        address = address.replace(':', '').replace('-', '')
+        address = int(address, 16)
+        prefix = int(prefix)
+
+        user_mask = 2 ** prefix - 1
+        iab_mask = (2 ** cls.CIDR_WITH - 1) ^ user_mask
+
+        return netaddr.EUI(address & iab_mask), cidr.prefixlen
 
 
 class IPPolicy(BASEV2, models.HasId, models.HasTenant):
