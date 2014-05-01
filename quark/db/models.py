@@ -433,7 +433,7 @@ class MacAddressRange(CIDRMixin, BASEV2, models.HasId):
         # NOTE(jkoelker) Compute the IAB Mask from the prefix
         #                The first part turns on all bits, then turn off
         #                the exactly PREFIX bits
-        iab_mask = ((1 << cls.CIDR_WITH) - 1) ^ ((1 << prefix) - 1)
+        iab_mask = ((1 << cls.CIDR_WIDTH) - 1) ^ ((1 << prefix) - 1)
 
         # NOTE(jkoelker) Combine the base address with the computed
         #                mask to make sure the proper bits are off.
