@@ -283,10 +283,6 @@ class Subnet(CIDRMixin, BASEV2, models.HasId, IsHazTags):
         else:
             self.ip_version = 6
 
-#    @cidr.expression
-#    def cidr(cls):
-#        return Subnet._cidr
-
     allocated_ips = orm.relationship(IPAddress,
                                      primaryjoin='and_(Subnet.id=='
                                      'IPAddress.subnet_id,'
@@ -306,22 +302,6 @@ class Subnet(CIDRMixin, BASEV2, models.HasId, IsHazTags):
                              sa.ForeignKey("quark_ip_policy.id"))
     # Legacy data
     do_not_use = sa.Column(sa.Boolean(), default=False)
-
-    def __init__(self, *args, **kwargs):
-        cidr = kwargs.pop('cidr', None)
-
-        if cidr is not None:
-            cidr = netaddr.IPNetwork(cidr)
-            kwargs['address'] = cidr[0]
-            kwargs['prefix'] = cidr.prefixlen
-
-        super(Subnet, self).__init__(*args, **kwargs)
-
-    def __str__(self):
-        if self.cidr.is_ipv4_mapped():
-            return str(self.cidr.ipv4())
-
-        return str(self.cidr)
 
 
 port_ip_association_table = sa.Table(
