@@ -85,6 +85,8 @@ class CIDRMixin(object):
     def last(self):
         return self.cidr.last
 
+    # NOTE(jkoelker) SQL version of ADDR | (( 1 << (WIDTH - PREFIX)) -1 )
+    #                Determines the largest integer within the prefix.
     @last.expression
     def last(cls):
         mask = func.pow(2, (cls.CIDR_WIDTH - cls.prefix)) - 1
@@ -454,9 +456,15 @@ class MacAddressRange(CIDRMixin, BASEV2, models.HasId):
         address = int(address, 16)
         prefix = int(prefix)
 
-        user_mask = 2 ** prefix - 1
-        iab_mask = (2 ** cls.CIDR_WITH - 1) ^ user_mask
+        # NOTE(jkoelker) Compute the IAB Mask from the prefix
+        #                The first part turns on all bits, then turn off
+        #                the exactly PREFIX bits
+        iab_mask = ((1 << cls.CIDR_WITH) - 1) ^ ((1 << prefix) - 1)
 
+        # NOTE(jkoelker) Combine the base address with the computed
+        #                mask to make sure the proper bits are off.
+        #                This allows an arbitrary address to be passed in
+        #                and the correct base address will be calulated.
         return netaddr.EUI(address & iab_mask), cidr.prefixlen
 
 
