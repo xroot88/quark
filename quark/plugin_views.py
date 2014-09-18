@@ -18,14 +18,13 @@ View Helpers for Quark Plugin
 """
 
 import netaddr
-from neutron.extensions import securitygroup as sg_ext
 from neutron.openstack.common import log as logging
 from oslo.config import cfg
 
-from quark.db import api as db_api
 from quark.db import models
 from quark import network_strategy
-from quark import utils
+from quark import protocols
+
 
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
@@ -35,7 +34,11 @@ quark_view_opts = [
     cfg.BoolOpt('show_allocation_pools',
                 default=True,
                 help=_('Controls whether or not to calculate and display'
-                       'allocation pools or not'))
+                       'allocation pools or not')),
+    cfg.BoolOpt('show_subnet_ip_policy_id',
+                default=True,
+                help=_('Controls whether or not to show ip_policy_id for'
+                       'subnets'))
 ]
 
 CONF.register_opts(quark_view_opts, "QUARK")
@@ -106,8 +109,10 @@ def _make_subnet_dict(subnet, fields=None):
            "dns_nameservers": dns_nameservers or [],
            "cidr": subnet.get("cidr"),
            "shared": STRATEGY.is_parent_network(net_id),
-           "enable_dhcp": None,
-           "ip_policy_id": subnet.get("ip_policy_id")}
+           "enable_dhcp": None}
+
+    if CONF.QUARK.show_subnet_ip_policy_id:
+        res['ip_policy_id'] = subnet.get("ip_policy_id")
 
     if CONF.QUARK.show_allocation_pools:
         res["allocation_pools"] = _allocation_pools(subnet)
@@ -151,13 +156,18 @@ def _make_security_group_dict(security_group, fields=None):
 
 
 def _make_security_group_rule_dict(security_rule, fields=None):
+    ethertype = protocols.human_readable_ethertype(
+        security_rule.get("ethertype"))
+    protocol = protocols.human_readable_protocol(
+        security_rule.get("protocol"), ethertype)
+
     res = {"id": security_rule.get("id"),
-           "ethertype": security_rule.get("ethertype"),
+           "ethertype": ethertype,
            "direction": security_rule.get("direction"),
            "tenant_id": security_rule.get("tenant_id"),
            "port_range_max": security_rule.get("port_range_max"),
            "port_range_min": security_rule.get("port_range_min"),
-           "protocol": security_rule.get("protocol"),
+           "protocol": protocol,
            "remote_ip_prefix": security_rule.get("remote_ip_prefix"),
            "security_group_id": security_rule.get("group_id"),
            "remote_group_id": security_rule.get("remote_group_id")}
@@ -254,17 +264,3 @@ def _make_ip_policy_dict(ipp):
             "subnet_ids": [s["id"] for s in ipp["subnets"]],
             "network_ids": [n["id"] for n in ipp["networks"]],
             "exclude": [ippc["cidr"] for ippc in ipp["exclude"]]}
-
-
-def make_security_group_list(context, group_ids):
-    if not group_ids or not utils.attr_specified(group_ids):
-        return ([], [])
-    group_ids = list(set(group_ids))
-    groups = []
-    for gid in group_ids:
-        group = db_api.security_group_find(context, id=gid,
-                                           scope=db_api.ONE)
-        if not group:
-            raise sg_ext.SecurityGroupNotFound(id=gid)
-        groups.append(group)
-    return (group_ids, groups)
