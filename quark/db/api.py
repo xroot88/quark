@@ -17,6 +17,7 @@ import datetime
 import inspect
 
 import netaddr
+from neutron.common import exceptions
 from neutron.openstack.common import log as logging
 from neutron.openstack.common import timeutils
 from neutron.openstack.common import uuidutils
@@ -143,22 +144,31 @@ def _model_query(context, model, filters, fields=None):
     if filters.get("cidr"):
         model_filters.append(model.cidr == filters["cidr"])
 
-    # Inject the tenant id if none is set. We don't need unqualified queries.
-    # This works even when a non-shared, other-tenant owned network is passed
-    # in because the authZ checks that happen in Neutron above us yank it back
-    # out of the result set.
-    if not filters and not context.is_admin:
-        filters["tenant_id"] = [context.tenant_id]
     # Begin:Added for RM6299
     if filters.get("used_by_tenant_id"):
         model_filters.append(model.used_by_tenant_id.in_(
                              filters["used_by_tenant_id"]))
+
+    # RM9305: this is hairy. I believe Nova is always an admin when talking
+    #         to Neutron. However, the tenant_id will get injected, so we
+    #         should use that to filter. Meanwhile, we need to provide the
+    #         ability to do an unqualified filter as neutron itself will
+    #         create a god context with no tenant as part of policy
+    #         enforcement.
+    if not filters.get("shared"):
+        if context.tenant_id is not None:
+            filters["tenant_id"] = [context.tenant_id]
+        else:
+            if not context.is_admin:
+                raise exceptions.NotAuthorized()
+
     if filters.get("tenant_id"):
         if model == models.IPAddress:
             model_filters.append(model.used_by_tenant_id.in_(
                                  filters["tenant_id"]))
         else:
             model_filters.append(model.tenant_id.in_(filters["tenant_id"]))
+
     # End: Added for RM6299
     if filters.get("device_owner"):
         model_filters.append(model.device_owner.in_(filters["device_owner"]))
@@ -195,6 +205,8 @@ def scoped(f):
 
 @scoped
 def port_find(context, fields=None, **filters):
+    filters.pop("shared", None)
+
     query = context.session.query(models.Port).options(
         orm.joinedload(models.Port.ip_addresses))
     model_filters = _model_query(context, models.Port, filters)
@@ -310,6 +322,7 @@ def ip_address_find(context, lock_mode=False, **filters):
 
 @scoped
 def mac_address_find(context, lock_mode=False, **filters):
+    filters.pop("shared", None)
     query = context.session.query(models.MacAddress)
     if lock_mode:
         query = query.with_lockmode("update")
@@ -334,6 +347,7 @@ def mac_address_range_find_allocation_counts(context, address=None):
 
 @scoped
 def mac_address_range_find(context, **filters):
+    filters.pop("shared", None)
     query = context.session.query(models.MacAddressRange)
     model_filters = _model_query(context, models.MacAddressRange, filters)
     return query.filter(*model_filters)
@@ -396,7 +410,6 @@ def network_find(context, fields=None, **filters):
                 return []
         else:
             defaults.insert(0, INVERT_DEFAULTS)
-        filters.pop("shared")
     return _network_find(context, fields, defaults=defaults, **filters)
 
 
@@ -455,6 +468,7 @@ def network_delete(context, network):
 
 
 def subnet_find_allocation_counts(context, net_id, **filters):
+    filters.pop("shared", None)
     query = context.session.query(models.Subnet,
                                   sql_func.count(models.IPAddress.address).
                                   label("count")).with_lockmode('update')
@@ -491,6 +505,7 @@ def subnet_find(context, **filters):
 
 
 def subnet_count_all(context, **filters):
+    filters.pop("shared", None)
     query = context.session.query(sql_func.count(models.Subnet.id))
     if filters.get("network_id"):
         query = query.filter(
@@ -519,6 +534,7 @@ def subnet_update(context, subnet, **kwargs):
 
 @scoped
 def route_find(context, fields=None, **filters):
+    filters.pop("shared", None)
     query = context.session.query(models.Route)
     model_filters = _model_query(context, models.Route, filters)
     return query.filter(*model_filters)
@@ -558,6 +574,7 @@ def dns_delete(context, dns):
 
 @scoped
 def security_group_find(context, **filters):
+    filters.pop("shared", None)
     query = context.session.query(models.SecurityGroup).options(
         orm.joinedload(models.SecurityGroup.rules))
     model_filters = _model_query(context, models.SecurityGroup, filters)
@@ -584,6 +601,7 @@ def security_group_delete(context, group):
 
 @scoped
 def security_group_rule_find(context, **filters):
+    filters.pop("shared", None)
     query = context.session.query(models.SecurityGroupRule)
     model_filters = _model_query(context, models.SecurityGroupRule, filters)
     return query.filter(*model_filters)
@@ -622,6 +640,7 @@ def ip_policy_create(context, **ip_policy_dict):
 
 @scoped
 def ip_policy_find(context, **filters):
+    filters.pop("shared", None)
     query = context.session.query(models.IPPolicy)
     model_filters = _model_query(context, models.IPPolicy, filters)
     return query.filter(*model_filters)
