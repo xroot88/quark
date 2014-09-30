@@ -844,50 +844,6 @@ class TestQuarkUpdateSubnet(test_quark_plugin.TestQuarkPlugin):
                              "1.1.1.1")
             self.assertIsNone(res["gateway_ip"])
 
-    def test_update_subnet_gateway_ip_with_default_route_in_db(self):
-        with self._stubs(
-            host_routes=self.DEFAULT_ROUTE,
-            new_routes=[dict(destination="0.0.0.0/0", nexthop="1.2.3.4")]
-        ) as (dns_create, route_update, route_create):
-            req = dict(subnet=dict(gateway_ip="1.2.3.4"))
-            res = self.plugin.update_subnet(self.context, 1, req)
-            self.assertEqual(dns_create.call_count, 0)
-            self.assertEqual(route_create.call_count, 0)
-            self.assertEqual(route_update.call_count, 1)
-            self.assertEqual(len(res["host_routes"]), 0)
-            self.assertEqual(res["gateway_ip"], "1.2.3.4")
-
-    def test_update_subnet_gateway_ip_with_non_default_route_in_db(self):
-        with self._stubs(
-            host_routes=[dict(destination="1.1.1.1/8", nexthop="9.9.9.9")],
-            find_routes=False,
-            new_routes=[dict(destination="1.1.1.1/8", nexthop="9.9.9.9"),
-                        dict(destination="0.0.0.0/0", nexthop="1.2.3.4")]
-        ) as (dns_create, route_update, route_create):
-            req = dict(subnet=dict(gateway_ip="1.2.3.4"))
-            res = self.plugin.update_subnet(self.context, 1, req)
-            self.assertEqual(dns_create.call_count, 0)
-            self.assertEqual(route_create.call_count, 1)
-
-            self.assertEqual(res["gateway_ip"], "1.2.3.4")
-
-            self.assertEqual(len(res["host_routes"]), 1)
-            res_tuples = [(r["destination"], r["nexthop"])
-                          for r in res["host_routes"]]
-            self.assertIn(("1.1.1.1/8", "9.9.9.9"), res_tuples)
-
-    def test_update_subnet_gateway_ip_without_default_route_in_db(self):
-        with self._stubs(
-            host_routes=None,
-            new_routes=[dict(destination="0.0.0.0/0", nexthop="1.2.3.4")]
-        ) as (dns_create, route_update, route_create):
-            req = dict(subnet=dict(gateway_ip="1.2.3.4"))
-            res = self.plugin.update_subnet(self.context, 1, req)
-            self.assertEqual(dns_create.call_count, 0)
-            self.assertEqual(route_create.call_count, 1)
-            self.assertEqual(len(res["host_routes"]), 0)
-            self.assertEqual(res["gateway_ip"], "1.2.3.4")
-
     def test_update_subnet_gateway_ip_with_default_route_in_args(self):
         new_routes = [dict(destination="0.0.0.0/0",
                            nexthop="4.3.2.1")]
@@ -911,87 +867,11 @@ class TestQuarkUpdateSubnet(test_quark_plugin.TestQuarkPlugin):
             self.assertEqual(resp["allocation_pools"],
                              [dict(start="172.16.0.1", end="172.16.0.254")])
 
-    def test_update_subnet_allocation_pools_invalid_outside(self):
-        pools = [dict(start="172.16.1.10", end="172.16.1.20")]
+    def test_update_subnet_allocation_pools_invalid(self):
+        pools = [dict(start="172.16.1.10", end="172.16.1.254")]
         s = dict(subnet=dict(allocation_pools=pools))
         with self._stubs() as (dns_create, route_update, route_create):
-            with self.assertRaises(exceptions.OutOfBoundsAllocationPool):
-                self.plugin.update_subnet(self.context, 1, s)
-
-    def test_create_subnet_allocation_pools_invalid_overlaps(self):
-        pools = [dict(start="172.15.255.255", end="172.16.0.20")]
-        s = dict(subnet=dict(allocation_pools=pools))
-        with self._stubs() as (dns_create, route_update, route_create):
-            with self.assertRaises(exceptions.OutOfBoundsAllocationPool):
-                self.plugin.update_subnet(self.context, 1, s)
-
-    def test_update_subnet_allocation_pools_one(self):
-        pools = [dict(start="172.16.0.10", end="172.16.0.20")]
-        s = dict(subnet=dict(allocation_pools=pools))
-        with self._stubs(
-            new_ip_policy=[
-                '172.16.0.0/29', '172.16.0.8/31', '172.16.0.21/32',
-                '172.16.0.22/31', '172.16.0.24/29', '172.16.0.32/27',
-                '172.16.0.64/26', '172.16.0.128/25']
-        ) as (dns_create, route_update, route_create):
-            resp = self.plugin.update_subnet(self.context, 1, s)
-            self.assertEqual(resp["allocation_pools"], pools)
-
-    def test_update_subnet_allocation_pools_two(self):
-        pools = [dict(start="172.16.0.10", end="172.16.0.20"),
-                 dict(start="172.16.0.40", end="172.16.0.50")]
-        s = dict(subnet=dict(allocation_pools=pools))
-        with self._stubs(
-            new_ip_policy=[
-                '172.16.0.0/29', '172.16.0.8/31', '172.16.0.21/32',
-                '172.16.0.22/31', '172.16.0.24/29', '172.16.0.32/29',
-                '172.16.0.51/32', '172.16.0.52/30', '172.16.0.56/29',
-                '172.16.0.64/26', '172.16.0.128/25']
-        ) as (dns_create, route_update, route_create):
-            resp = self.plugin.update_subnet(self.context, 1, s)
-            self.assertEqual(resp["allocation_pools"], pools)
-
-    def test_update_subnet_allocation_pools_three(self):
-        pools = [dict(start="172.16.0.5", end="172.16.0.254")]
-        s = dict(subnet=dict(allocation_pools=pools))
-        with self._stubs(
-            new_ip_policy=['172.16.0.0/30', '172.16.0.4/32', '172.16.0.255/32']
-        ) as (dns_create, route_update, route_create):
-            resp = self.plugin.update_subnet(self.context, 1, s)
-            self.assertEqual(resp["allocation_pools"], pools)
-
-    def test_update_subnet_allocation_pools_four(self):
-        pools = [dict(start="2607:f0d0:1002:51::a",
-                      end="2607:f0d0:1002:51:ffff:ffff:ffff:fffe")]
-        s = dict(subnet=dict(allocation_pools=pools))
-        with self._stubs(
-            ip_version=6,
-            new_ip_policy=[
-                '2607:f0d0:1002:51::/125', '2607:f0d0:1002:51::8/127',
-                '2607:f0d0:1002:51:ffff:ffff:ffff:ffff/128']
-        ) as (dns_create, route_update, route_create):
-            resp = self.plugin.update_subnet(self.context, 1, s)
-            self.assertEqual(resp["allocation_pools"], pools)
-
-    def test_update_subnet_allocation_pools_empty_list(self):
-        # Empty allocation_pools list yields subnet completely blocked out.
-        pools = []
-        s = dict(subnet=dict(allocation_pools=pools))
-        with self._stubs(
-            new_ip_policy=[]
-        ) as (dns_create, route_update, route_create):
-            resp = self.plugin.update_subnet(self.context, 1, s)
-            expected_pools = []
-            self.assertEqual(resp["allocation_pools"], expected_pools)
-
-    def test_update_subnet_conflicting_gateway(self):
-        pools = [dict(start="172.16.0.1", end="172.16.0.254")]
-        s = dict(subnet=dict(allocation_pools=pools, gateway_ip="172.16.0.1"))
-        with self._stubs(
-            new_ip_policy=['172.16.0.0/30', '172.16.0.4/32', '172.16.0.255/32']
-        ) as (dns_create, route_update, route_create):
-            with self.assertRaises(
-                    exceptions.GatewayConflictWithAllocationPools):
+            with self.assertRaises(exceptions.BadRequest):
                 self.plugin.update_subnet(self.context, 1, s)
 
 
@@ -1362,7 +1242,6 @@ class TestQuarkUpdateSubnetAttrFilters(test_quark_plugin.TestQuarkPlugin):
         subnet = {"subnet": {
             "network_id": 1, "tenant_id": self.context.tenant_id,
             "ip_version": 4, "cidr": "172.16.0.0/24",
-            "gateway_ip": "0.0.0.0",
             "dns_nameservers": neutron_attrs.ATTR_NOT_SPECIFIED,
             "host_routes": neutron_attrs.ATTR_NOT_SPECIFIED,
             "enable_dhcp": None, "first_ip": 0, "last_ip": 1,
@@ -1383,7 +1262,6 @@ class TestQuarkUpdateSubnetAttrFilters(test_quark_plugin.TestQuarkPlugin):
         subnet = {"subnet": {
             "network_id": 1, "tenant_id": self.context.tenant_id,
             "ip_version": 4, "cidr": "172.16.0.0/24",
-            "gateway_ip": "0.0.0.0",
             "dns_nameservers": neutron_attrs.ATTR_NOT_SPECIFIED,
             "host_routes": neutron_attrs.ATTR_NOT_SPECIFIED,
             "enable_dhcp": False, "first_ip": 0, "last_ip": 1,

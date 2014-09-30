@@ -219,32 +219,12 @@ def update_subnet(context, id, subnet):
 
         dns_ips = utils.pop_param(s, "dns_nameservers", [])
         host_routes = utils.pop_param(s, "host_routes", [])
-        gateway_ip = utils.pop_param(s, "gateway_ip", None)
         allocation_pools = utils.pop_param(s, "allocation_pools", None)
 
-        alloc_pools = allocation_pool.AllocationPools(subnet_db["cidr"],
-                                                      allocation_pools)
-
-        if gateway_ip:
-            alloc_pools.validate_gateway_excluded(gateway_ip)
-            default_route = None
-            for route in host_routes:
-                netaddr_route = netaddr.IPNetwork(route["destination"])
-                if netaddr_route.value == routes.DEFAULT_ROUTE.value:
-                    default_route = route
-                    break
-
-            if default_route is None:
-                route_model = db_api.route_find(
-                    context, cidr=str(routes.DEFAULT_ROUTE), subnet_id=id,
-                    scope=db_api.ONE)
-                if route_model:
-                    db_api.route_update(context, route_model,
-                                        gateway=gateway_ip)
-                else:
-                    db_api.route_create(context,
-                                        cidr=str(routes.DEFAULT_ROUTE),
-                                        gateway=gateway_ip, subnet_id=id)
+        if allocation_pools:
+            raise exceptions.BadRequest(
+                resource="subnets",
+                msg="Allocation pools may not be updated after creation")
 
         if dns_ips:
             subnet_db["dns_nameservers"] = []
@@ -258,12 +238,6 @@ def update_subnet(context, id, subnet):
         for route in host_routes:
             subnet_db["routes"].append(db_api.route_create(
                 context, cidr=route["destination"], gateway=route["nexthop"]))
-
-        if isinstance(allocation_pools, list):
-            cidrs = alloc_pools.get_policy_cidrs()
-            ip_policies.ensure_default_policy(cidrs, [subnet_db])
-            subnet_db["ip_policy"] = db_api.ip_policy_update(
-                context, subnet_db["ip_policy"], exclude=cidrs)
 
         subnet = db_api.subnet_update(context, subnet_db, **s)
     return v._make_subnet_dict(subnet)
