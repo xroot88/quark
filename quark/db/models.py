@@ -385,6 +385,7 @@ class MacAddressRange(BASEV2, models.HasId):
 
 class IPPolicy(BASEV2, models.HasId, models.HasTenant):
     __tablename__ = "quark_ip_policy"
+    __mapper_args__ = {'exclude_properties': ['created_at']}
     networks = orm.relationship(
         "Network",
         primaryjoin="IPPolicy.id==Network.ip_policy_id",
@@ -412,6 +413,7 @@ class IPPolicy(BASEV2, models.HasId, models.HasTenant):
 
 class IPPolicyCIDR(BASEV2, models.HasId):
     __tablename__ = "quark_ip_policy_cidrs"
+    __mapper_args__ = {'exclude_properties': ['created_at']}
     ip_policy_id = sa.Column(sa.String(36), sa.ForeignKey(
         "quark_ip_policy.id", ondelete="CASCADE"))
     cidr = sa.Column(sa.String(64))
