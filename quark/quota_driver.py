@@ -16,6 +16,7 @@
 #    under the License.
 
 from neutron.db import quota_db
+from neutron.db.quota import models as quota_models
 
 
 class QuarkQuotaDriver(quota_db.DbQuotaDriver):
@@ -31,19 +32,19 @@ class QuarkQuotaDriver(quota_db.DbQuotaDriver):
         Atfer deletion, this tenant will use default quota values in conf.
         """
 
-        tenant_quotas = context.session.query(quota_db.Quota)
+        tenant_quotas = context.session.query(quota_models.models.Quota)
         tenant_quotas = tenant_quotas.filter_by(tenant_id=tenant_id)
         tenant_quotas.delete()
 
     @staticmethod
     def update_quota_limit(context, tenant_id, resource, limit):
-        tenant_quota = context.session.query(quota_db.Quota).filter_by(
+        tenant_quota = context.session.query(quota_models.Quota).filter_by(
             tenant_id=tenant_id, resource=resource).first()
 
         if tenant_quota:
             tenant_quota.update({'limit': limit})
         else:
-            tenant_quota = quota_db.Quota(tenant_id=tenant_id,
-                                          resource=resource,
-                                          limit=limit)
+            tenant_quota = quota_models.Quota(tenant_id=tenant_id,
+                                              resource=resource,
+                                              limit=limit)
             context.session.add(tenant_quota)
