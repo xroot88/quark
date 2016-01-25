@@ -170,7 +170,7 @@ class QuarkIPAMLog(object):
         statistics = ("TIME:%f ATTEMPTS:%d PASS:%d FAIL:%d" %
                       (time_total, fails + successes, successes, fails))
         if not self.success:
-            LOG.warning("STATUS:FAILED %s" % statistics)
+            LOG.error("STATUS:FAILED %s" % statistics)
         else:
             LOG.debug("STATUS:SUCCESS %s" % statistics)
 
