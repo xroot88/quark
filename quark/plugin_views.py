@@ -354,6 +354,7 @@ def _make_scaling_ip_dict(flip):
             "status": flip.get("status"),
             "ports": ports}
 
+
 def _make_netinfo_instance_dict(instance):
     info = {
         "instance_netinfo": {
@@ -361,6 +362,7 @@ def _make_netinfo_instance_dict(instance):
         }
     }
     return info
+
 
 def _make_netinfo_tenant_dict(tenant):
     info = {
@@ -371,6 +373,7 @@ def _make_netinfo_tenant_dict(tenant):
         }
     }
     return info
+
 
 def _make_billinfo_tenant_dict(tenant):
     info = {

@@ -16,13 +16,12 @@
 from oslo_config import cfg
 from oslo_log import log as logging
 
-from quark.db import api as db_api
-from quark.db import ip_types
 from quark import plugin_views as v
 
 
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
+
 
 def get_netinfo_instances(context,
                           filters,
@@ -34,9 +33,11 @@ def get_netinfo_instances(context,
     instances = []
     return [v._make_netinfo_instance_dict() for instance in instances]
 
+
 def get_netinfo_instance(context, id, fields):
     instance = None
     return v._make_netinfo_instance_dict(instance)
+
 
 def get_netinfo_tenants(context,
                         filters,
@@ -48,9 +49,11 @@ def get_netinfo_tenants(context,
     tenants = []
     return [v._make_netinfo_tenant_dict() for tenant in tenants]
 
+
 def get_netinfo_tenant(context, id, fields):
     tenant = None
     return v._make_netinfo_tenant_dict(tenant)
+
 
 def get_billinfo_tenants(context,
                          filters,
@@ -62,7 +65,7 @@ def get_billinfo_tenants(context,
     tenants = []
     return [v._make_billinfo_tenant_dict() for tenant in tenants]
 
+
 def get_billinfo_tenant(context, id, fields):
     tenant = None
     return v._make_billinfo_tenant_dict(tenant)
-

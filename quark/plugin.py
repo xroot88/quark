@@ -27,6 +27,7 @@ import webob.exc
 
 from quark.api import extensions
 from quark import ip_availability
+from quark.plugin_modules import audit
 from quark.plugin_modules import floating_ips
 from quark.plugin_modules import ip_addresses
 from quark.plugin_modules import ip_policies
@@ -38,7 +39,6 @@ from quark.plugin_modules import routes
 from quark.plugin_modules import security_groups
 from quark.plugin_modules import segment_allocation_ranges
 from quark.plugin_modules import subnets
-from quark.plugin_modules import audit
 
 LOG = logging.getLogger(__name__)
 
@@ -510,8 +510,8 @@ class Plugin(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
     @sessioned
     def get_netinfo_instances(self, context, filters=None, fields=None,
-                   sorts=None, limit=None, marker=None,
-                   page_reverse=False):
+                              sorts=None, limit=None, marker=None,
+                              page_reverse=False):
         return audit.get_netinfo_instances(context,
                                            filters=filters,
                                            fields=fields,
@@ -526,15 +526,15 @@ class Plugin(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
     @sessioned
     def get_netinfo_tenants(self, context, filters=None, fields=None,
-                   sorts=None, limit=None, marker=None,
-                   page_reverse=False):
+                            sorts=None, limit=None, marker=None,
+                            page_reverse=False):
         return audit.get_netinfo_tenants(context,
                                          filters=filters,
                                          fields=fields,
                                          sorts=sorts,
                                          limit=limit,
-                                           marker=marker,
-                                           page_reverse=page_reverse)
+                                         marker=marker,
+                                         page_reverse=page_reverse)
 
     @sessioned
     def get_billinfo_tenant(self, context, id, fields):
@@ -542,8 +542,8 @@ class Plugin(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
     @sessioned
     def get_billinfo_tenants(self, context, filters=None, fields=None,
-                   sorts=None, limit=None, marker=None,
-                   page_reverse=False):
+                             sorts=None, limit=None, marker=None,
+                             page_reverse=False):
         return audit.get_billinfo_tenants(context,
                                           filters=filters,
                                           fields=fields,

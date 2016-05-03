@@ -19,8 +19,6 @@
 #
 
 from neutron.api import extensions
-from neutron.api.v2 import base
-from neutron import manager
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import resource_helper
 
@@ -50,10 +48,9 @@ RESOURCE_ATTRIBUTE_MAP = {
     }
 }
 
+
 class Audit(extensions.ExtensionDescriptor):
-    """
-        -= The name of the class must match the file name =-
-    """
+    """The name of the class must match the file name"""
     @classmethod
     def get_name(cls):
         return 'Quark %s' % RESOURCE_NAME
