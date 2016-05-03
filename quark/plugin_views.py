@@ -353,3 +353,31 @@ def _make_scaling_ip_dict(flip):
             "tenant_id": flip.get("used_by_tenant_id"),
             "status": flip.get("status"),
             "ports": ports}
+
+def _make_netinfo_instance_dict(instance):
+    info = {
+        "instance_netinfo": {
+            "ports": []
+        }
+    }
+    return info
+
+def _make_netinfo_tenant_dict(tenant):
+    info = {
+        "tenant_netinfo": {
+            "instances": [],
+            "floating_ips": [],
+            "security_groups": []
+        }
+    }
+    return info
+
+def _make_billinfo_tenant_dict(tenant):
+    info = {
+        "tenant_billinfo": {
+            "instances": [],
+            "floating_ips": [],
+            "shared_ips": []
+        }
+    }
+    return info
