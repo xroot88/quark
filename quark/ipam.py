@@ -161,28 +161,30 @@ def _notify(context, event_type, ipaddress):
     We must send USAGE when a public IPv4 address is deallocated or a FLIP is
     associated.
     """
+    # First record the timestamp of when the notifier was called
+    now = now()
+
     # Build payloads based on the message type and supply the correct start/end
     # times. The rules for start/end times:
     # ip.add/ip.disassocisate need start_time
     # ip.delete/ip.associate needs end_time
     if event_type == 'ip.add':
+        # allocated_at is more precise than now(), so we use allocated_at
         payload = build_payload(ipaddress,
                                 event_type,
-                                start_time=ipaddress.allocated_at)
+                                event_time=ipaddress.allocated_at)
     elif event_type == 'ip.delete':
-        end_time = now()
+        send_usage = True
         payload = build_payload(ipaddress,
                                 event_type,
-                                end_time=end_time)
-        send_usage = True
+                                event_time=now)
     elif event_type == 'ip.associate':
-        end_time = now()
-        payload = build_payload(ipaddress, event_type, end_time=end_time)
         send_usage = True
+        payload = build_payload(ipaddress, event_type, event_time=now)
     elif event_type == 'ip.disassociate':
-        payload = build_payload(ipaddress, event_type, start_time=now())
+        payload = build_payload(ipaddress, event_type, event_time=now)
     else:
-        LOG.error('NOTIFY: unknown event_type {}'.format(event_type))
+        LOG.error('IPAM: unknown event_type {}'.format(event_type))
         return
 
     # Send the notification with the payload
@@ -197,7 +199,10 @@ def _notify(context, event_type, ipaddress):
             start_time = ipaddress.allocated_at
         else:
             start_time = midnight_today()
-        payload = build_payload(ipaddress, 'ip.exists', start_time, end_time)
+        payload = build_payload(ipaddress,
+                                'ip.exists',
+                                start_time=start_time,
+                                end_time=now)
         do_notify(context, 'ip.exists', payload)
 
 

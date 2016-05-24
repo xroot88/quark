@@ -83,6 +83,7 @@ def do_notify(context, event_type, payload):
 
 def build_payload(ipaddress,
                   event_type,
+                  event_time=None,
                   start_time=None,
                   end_time=None):
     """Method builds a payload out of the passed arguments.
@@ -116,21 +117,30 @@ def build_payload(ipaddress,
     # Depending on the message type add the appropriate fields
     if event_type == 'ip.exists':
         if start_time is None or end_time is None:
-            raise ValueError('IP_BILL: {}: start_time and/or end_time cannot' +
-                             ' be empty'.format(event_type))
+            raise ValueError('IP_BILL: {} start_time/end_time cannot be empty'\
+                             .format(event_type))
         payload.update({
             'startTime': unicode(convert_timestamp(start_time)),
             'endTime': unicode(convert_timestamp(end_time))
         })
     elif event_type == 'ip.add':
+        if event_time is None:
+            raise ValueError('IP_BILL: {}: event_time cannot be NULL'\
+                             .format(event_type))
         payload.update({
-            'eventTime': unicode(convert_timestamp(start_time)),
+            'eventTime': unicode(convert_timestamp(event_time)),
         })
     elif event_type == 'ip.delete':
+        if event_time is None:
+            raise ValueError('IP_BILL: {}: event_time cannot be NULL'\
+                             .format(event_type))
         payload.update({
-            'eventTime': unicode(convert_timestamp(end_time))
+            'eventTime': unicode(convert_timestamp(event_time))
         })
     elif event_type == 'ip.associate' or event_type == 'ip.disassociate':
+        if event_time is None:
+            raise ValueError('IP_BILL: {}: event_time cannot be NULL'\
+                             .format(event_type))
         # only pass floating ip addresses through this
         if ipaddress.address_type != 'floating':
             raise ValueError('IP_BILL: {} only valid for floating IPs'.\
@@ -141,14 +151,14 @@ def build_payload(ipaddress,
                 raise ValueError('IP_BILL: start_time is required ' +
                                  'for ip.associate')
             payload.update({
-                'eventTime': unicode(convert_timestamp(start_time))
+                'eventTime': unicode(convert_timestamp(event_time))
             })
         else: # ip.disassociate
             if end_time is None:
                 raise ValueError('IP_BILL: end_time is required ' +
                                  'for ip.disassociate')
             payload.update({
-                'eventTime': unicode(convert_timestamp(end_time))
+                'eventTime': unicode(convert_timestamp(event_time))
             })
     else:
         raise ValueError('IP_BILL: bad event_type: {}'.format(event_type))
@@ -276,7 +286,6 @@ def seconds_since_midnight(ts):
     return (ts - ts.replace(hour=0, minute=0, second=0)).seconds
 
 def make_case2(context):
-    import ipdb; ipdb.set_trace()
     query = context.session.query(models.IPAddress)
     period_start, period_end = calc_periods()
     ip_list = build_full_day_ips(query, period_start, period_end)

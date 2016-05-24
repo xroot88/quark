@@ -50,6 +50,8 @@ def main():
     config.setup_logging()
     context = neutron_context.get_admin_context()
 
+    ##billing.make_case2(context)
+
     # A query to get all IPAddress objects from the db
     query = context.session.query(models.IPAddress)
 
@@ -68,8 +70,8 @@ def main():
             print 'start: {}, end: {}'.format(period_start, period_end)
             payload = billing.build_payload(ipaddress,
                                             'ip.exists',
-                                            period_start,
-                                            period_end)
+                                            start_time=period_start,
+                                            end_time=period_end)
             billing.do_notify(context,
                               'ip.exists',
                               payload)
@@ -78,8 +80,8 @@ def main():
             print 'start: {}, end: {}'.format(period_start, period_end)
             payload = billing.build_payload(ipaddress,
                                             'ip.exists',
-                                            ipaddress.allocated_at,
-                                            period_end)
+                                            start_time=ipaddress.allocated_at,
+                                            end_time=period_end)
             billing.do_notify(context,
                               'ip.exists',
                               payload)
@@ -88,8 +90,8 @@ def main():
         for ipaddress in full_day_ips:
             pp(billing.build_payload(ipaddress,
                                      'ip.exists',
-                                     period_start,
-                                     period_end))
+                                     start_time=period_start,
+                                     end_time=period_end))
 
         print '\n=====================================================\n'
 
@@ -97,8 +99,8 @@ def main():
         for ipaddress in partial_day_ips:
             pp(billing.build_payload(ipaddress,
                                      'ip.exists',
-                                     ipaddress.allocated_at,
-                                     period_end))
+                                     start_time=ipaddress.allocated_at,
+                                     end_time=period_end))
 
 if __name__ == '__main__':
     main()
