@@ -157,34 +157,46 @@ def ipam_logged(fx):
 
 
 def _notify(context, event_type, ipaddress):
-    """Method to send notifications
+    """Method to send notifications.
+    We must send USAGE when a public IPv4 address is deallocated or a FLIP is
+    associated.
     """
+    # Build payloads based on the message type and supply the correct start/end
+    # times. The rules for start/end times:
+    # ip.add/ip.disassocisate need start_time
+    # ip.delete/ip.associate needs end_time
     if event_type == 'ip.add':
-        start_time = ipaddress.allocated_at
-        end_time = None     # not used
+        payload = build_payload(ipaddress,
+                                event_type,
+                                start_time=ipaddress.allocated_at)
     elif event_type == 'ip.delete':
-        start_time = None
-        end_time = ipaddress.deallocated_at
-        send_usage = True   # not used
-    elif event_type == 'ip.associate':
-        start_time = None   # not used
         end_time = now()
+        payload = build_payload(ipaddress,
+                                event_type,
+                                end_time=end_time)
+        send_usage = True
+    elif event_type == 'ip.associate':
+        end_time = now()
+        payload = build_payload(ipaddress, event_type, end_time=end_time)
         send_usage = True
     elif event_type == 'ip.disassociate':
-        start_time = now()
-        end_time = None     # not used
+        payload = build_payload(ipaddress, event_type, start_time=now())
     else:
         LOG.error('NOTIFY: unknown event_type {}'.format(event_type))
         return
 
-    payload = build_payload(ipaddress, event_type, start_time, end_time)
+    # Send the notification with the payload
     do_notify(context, event_type, payload)
 
     # When we deallocate an IP or associate a FLIP we must send 
-    # a usage message to billing
+    # a usage message to billing.
+    # In other words when we supply end_time we must send USAGE to billing
+    # immediately.
     if send_usage:
-        if start_time is None:
-            start_time = 
+        if ipaddress.allocated_at >= midnight_today():
+            start_time = ipaddress.allocated_at
+        else:
+            start_time = midnight_today()
         payload = build_payload(ipaddress, 'ip.exists', start_time, end_time)
         do_notify(context, 'ip.exists', payload)
 

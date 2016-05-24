@@ -100,6 +100,7 @@ def build_payload(ipaddress,
         ip.disassociate  - DOWN
     http://docs-internal-staging.rackspace.com/cloud-feeds/api/v1.0/feeds-publishers-guide/feeds-publishers-guide-latest.pdf
     """
+    # This is the common part of all message types
     payload = {
         'event_type': unicode(EVENT_TYPE_2_CLOUDFEEDS[event_type]),
         'tenant_id': int(ipaddress.used_by_tenant_id),
@@ -111,6 +112,8 @@ def build_payload(ipaddress,
         'ip_type': unicode(ipaddress.address_type),
         'id': unicode(ipaddress.id)
     }
+
+    # Depending on the message type add the appropriate fields
     if event_type == 'ip.exists':
         if start_time is None or end_time is None:
             raise ValueError('IP_BILL: {}: start_time and/or end_time cannot' +
