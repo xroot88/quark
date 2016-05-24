@@ -69,16 +69,73 @@ EVENT_TYPE_2_CLOUDFEEDS = {
 }
 
 def do_notify(context, event_type, payload):
-    """Notifies billing.
+    """Generic Notifier.
     Parameters:
         - `context`: session context
         - `event_type`: the event type to report, i.e. ip.usage
-        - `ipaddress`: IPAddress object
+        - `payload`: dict containing the payload to send
     """
     LOG.debug('IP_BILL: notifying {}'.format(payload))
 
     notifier = n_rpc.get_notifier('network')
     notifier.info(context, event_type, payload)
+
+
+def notify(context, event_type, ipaddress, send_usage=False):
+    """Method to send notifications.
+    We must send USAGE when a public IPv4 address is deallocated or a FLIP is
+    associated.
+    Parameters:
+        - `context`: the context for notifier
+        - `event_type`: the event type for IP allocate, deallocate, associate,
+        disassociate
+        - `ipaddress`: the ipaddress object to notify about
+    Returns:
+        nothing
+    Notes: this may live in the billing module
+    """
+    # First record the timestamp of when the notifier was called
+    now = now()
+
+    # Build payloads based on the message type and supply the correct start/end
+    # or event times.
+    if event_type == 'ip.add':
+        # allocated_at is more precise than now(), so we use allocated_at
+        payload = build_payload(ipaddress,
+                                event_type,
+                                event_time=ipaddress.allocated_at)
+    elif event_type == 'ip.delete':
+        payload = build_payload(ipaddress,
+                                event_type,
+                                event_time=now)
+    elif event_type == 'ip.associate':
+        payload = build_payload(ipaddress, event_type, event_time=now)
+    elif event_type == 'ip.disassociate':
+        payload = build_payload(ipaddress, event_type, event_time=now)
+    else:
+        LOG.error('IPAM: unknown event_type {}'.format(event_type))
+        return
+
+    # Send the notification with the payload
+    do_notify(context, event_type, payload)
+
+    # When we deallocate an IP or associate a FLIP we must send
+    # a usage message to billing.
+    # In other words when we supply end_time we must send USAGE to billing
+    # immediately.
+    # Our billing period is 24 hrs. If the address was allocated after midnight
+    # send the start_time as as. If the address was allocated yesterday, then
+    # send midnight as the start_time.
+    if send_usage:
+        if ipaddress.allocated_at >= midnight_today():
+            start_time = ipaddress.allocated_at
+        else:
+            start_time = midnight_today()
+        payload = build_payload(ipaddress,
+                                'ip.exists',
+                                start_time=start_time,
+                                end_time=now)
+        do_notify(context, 'ip.exists', payload)
 
 
 def build_payload(ipaddress,

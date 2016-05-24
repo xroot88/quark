@@ -33,7 +33,7 @@ from oslo_db import exception as db_exception
 from oslo_log import log as logging
 from oslo_utils import timeutils
 
-from quark.billing import do_notify, build_payload, midnight_today, now
+from quark.billing import notify
 from quark.db import api as db_api
 from quark.db import ip_types
 from quark.db import models
@@ -154,56 +154,6 @@ def ipam_logged(fx):
         finally:
             log.end()
     return wrap
-
-
-def _notify(context, event_type, ipaddress):
-    """Method to send notifications.
-    We must send USAGE when a public IPv4 address is deallocated or a FLIP is
-    associated.
-    """
-    # First record the timestamp of when the notifier was called
-    now = now()
-
-    # Build payloads based on the message type and supply the correct start/end
-    # times. The rules for start/end times:
-    # ip.add/ip.disassocisate need start_time
-    # ip.delete/ip.associate needs end_time
-    if event_type == 'ip.add':
-        # allocated_at is more precise than now(), so we use allocated_at
-        payload = build_payload(ipaddress,
-                                event_type,
-                                event_time=ipaddress.allocated_at)
-    elif event_type == 'ip.delete':
-        send_usage = True
-        payload = build_payload(ipaddress,
-                                event_type,
-                                event_time=now)
-    elif event_type == 'ip.associate':
-        send_usage = True
-        payload = build_payload(ipaddress, event_type, event_time=now)
-    elif event_type == 'ip.disassociate':
-        payload = build_payload(ipaddress, event_type, event_time=now)
-    else:
-        LOG.error('IPAM: unknown event_type {}'.format(event_type))
-        return
-
-    # Send the notification with the payload
-    do_notify(context, event_type, payload)
-
-    # When we deallocate an IP or associate a FLIP we must send 
-    # a usage message to billing.
-    # In other words when we supply end_time we must send USAGE to billing
-    # immediately.
-    if send_usage:
-        if ipaddress.allocated_at >= midnight_today():
-            start_time = ipaddress.allocated_at
-        else:
-            start_time = midnight_today()
-        payload = build_payload(ipaddress,
-                                'ip.exists',
-                                start_time=start_time,
-                                end_time=now)
-        do_notify(context, 'ip.exists', payload)
 
 
 class QuarkIPAMLog(object):
@@ -527,7 +477,7 @@ class QuarkIpam(object):
                     port_id=port_id,
                     address_type=kwargs.get('address_type', ip_types.FIXED))
                 address["deallocated"] = 0
-                _notify(context, 'ip.add', ipaddress)
+                notify(context, 'ip.add', ipaddress)
 
         except Exception:
             # NOTE(mdietz): Our version of sqlalchemy incorrectly raises None
@@ -600,7 +550,7 @@ class QuarkIpam(object):
                             version=subnet["ip_version"], network_id=net_id,
                             address_type=kwargs.get('address_type',
                                                     ip_types.FIXED))
-                        _notify(context, 'ip.add', ipaddress)
+                        notify(context, 'ip.add', ipaddress)
                         return address
                 except db_exception.DBDuplicateEntry:
                     # This shouldn't ever happen, since we hold a unique MAC
@@ -739,7 +689,7 @@ class QuarkIpam(object):
 
         if self.is_strategy_satisfied(new_addresses, allocate_complete=True):
             for address in new_addresses:
-                _notify(context, 'ip.add', address)
+                notify(context, 'ip.add', address)
             LOG.info("IPAM for port ID {0} completed with addresses "
                      "{1}".format(port_id,
                                   [a["address_readable"]
@@ -756,7 +706,7 @@ class QuarkIpam(object):
             address["deallocated"] = 1
             address["address_type"] = None
 
-        _notify(context, 'ip.delete', address, send_usage=True)
+        notify(context, 'ip.delete', address, send_usage=True)
 
     def deallocate_ips_by_port(self, context, port=None, **kwargs):
         ips_to_remove = []
@@ -806,6 +756,7 @@ class QuarkIpam(object):
                 # SQLAlchemy caching.
                 context.session.add(flip)
                 context.session.flush()
+                notify(context, 'ip.disassociate', flip)
                 driver = registry.DRIVER_REGISTRY.get_driver()
                 driver.remove_floating_ip(flip)
             elif len(flip.fixed_ips) > 1:
@@ -819,6 +770,7 @@ class QuarkIpam(object):
                             context, flip, fix_ip)
                         context.session.add(flip)
                         context.session.flush()
+                        notify(context, 'ip.disassociate', flip)
                     else:
                         remaining_fixed_ips.append(fix_ip)
                 port_fixed_ips = {}
