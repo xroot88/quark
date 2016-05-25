@@ -113,7 +113,7 @@ def notify(context, event_type, ipaddress, send_usage=False):
     elif event_type == 'ip.disassociate':
         payload = build_payload(ipaddress, event_type, event_time=now)
     else:
-        LOG.error('IPAM: unknown event_type {}'.format(event_type))
+        LOG.error('IP_BILL: unknown event_type {}'.format(event_type))
         return
 
     # Send the notification with the payload
