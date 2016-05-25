@@ -346,7 +346,7 @@ class QuarkIpam(object):
         LOG.info("Attempting to reallocate an IP (step 1 of 3) - [{0}]".format(
             utils.pretty_kwargs(network_id=net_id, port_id=port_id,
                                 version=version, segment_id=segment_id,
-                                subnets=subnets)))
+                                subnets=subnets, ip_address=ip_address)))
 
         if version == 6:
             # Defers to the create case. The reason why is we'd have to look
@@ -453,7 +453,11 @@ class QuarkIpam(object):
                                                  port_id=port_id,
                                                  ip_address=ip_address)))
 
-        ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
+        if subnet and subnet["ip_policy"]:
+            ip_policy_cidrs = subnet["ip_policy"].get_cidrs_ip_set()
+        else:
+            ip_policy_cidrs = netaddr.IPSet([])
+
         next_ip = ip_address
         if not next_ip:
             if subnet["next_auto_assign_ip"] != -1:
@@ -478,12 +482,9 @@ class QuarkIpam(object):
                     address_type=kwargs.get('address_type', ip_types.FIXED))
                 address["deallocated"] = 0
                 notify(context, 'ip.add', ipaddress)
-
-        except Exception:
-            # NOTE(mdietz): Our version of sqlalchemy incorrectly raises None
-            #               here when there's an IP conflict
-            if ip_address:
-                raise n_exc.IpAddressInUse(ip_address=next_ip, net_id=net_id)
+        except db_exception.DBDuplicateEntry:
+            raise q_exc.CannotAllocateReallocateableIP(ip_address=next_ip)
+        except db_exception.DBError:
             raise q_exc.IPAddressRetryableFailure(ip_addr=next_ip,
                                                   net_id=net_id)
 
@@ -521,7 +522,11 @@ class QuarkIpam(object):
             if mac:
                 mac = kwargs["mac_address"].get("address")
 
-            ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
+            if subnet and subnet["ip_policy"]:
+                ip_policy_cidrs = subnet["ip_policy"].get_cidrs_ip_set()
+            else:
+                ip_policy_cidrs = netaddr.IPSet([])
+
             for tries, ip_address in enumerate(
                     generate_v6(mac, port_id, subnet["cidr"])):
 
@@ -570,8 +575,12 @@ class QuarkIpam(object):
                      new_addresses=new_addresses, ip_address=ip_address)))
 
         subnets = subnets or []
+        allocated_ips = [ip.get("address_readable") for ip in new_addresses]
         for subnet in subnets:
             if not subnet:
+                continue
+
+            if str(ip_address) in allocated_ips:
                 continue
 
             LOG.info("Attempting to allocate from {0} - {1}".format(

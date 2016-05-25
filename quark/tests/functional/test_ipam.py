@@ -18,10 +18,21 @@ import contextlib
 import mock
 import netaddr
 from neutron.common import rpc
+from neutron_lib import exceptions as n_exc
 
 from quark.db import api as db_api
+from quark.db import models
+from quark import exceptions as q_exc
 import quark.ipam
+
+# import below necessary if file run by itself
+from quark import plugin  # noqa
+import quark.plugin_modules.ip_policies as policy_api
+import quark.plugin_modules.networks as network_api
+import quark.plugin_modules.subnets as subnet_api
 from quark.tests.functional.base import BaseFunctionalTest
+
+from oslo_config import cfg
 
 
 class QuarkIpamBaseFunctionalTest(BaseFunctionalTest):
@@ -66,6 +77,46 @@ class QuarkIPAddressAllocate(QuarkIpamBaseFunctionalTest):
             self.assertEqual(ipaddress[0]['address'], 281470681743362)
             self.assertEqual(ipaddress[0]['version'], 4)
             self.assertEqual(ipaddress[0]['used_by_tenant_id'], "fake")
+
+
+class TestQuarkIpamAllocateFromV6Subnet(QuarkIpamBaseFunctionalTest):
+    @contextlib.contextmanager
+    def _stubs(self, network, subnet, ip_policy):
+        self.ipam = quark.ipam.QuarkIpamANY()
+        with contextlib.nested(mock.patch("neutron.common.rpc.get_notifier")):
+            net = network_api.create_network(self.context, network)
+            subnet['subnet']['network_id'] = net['id']
+            sub = subnet_api.create_subnet(self.context, subnet)
+            ipp = policy_api.update_ip_policy(self.context,
+                                              sub["ip_policy_id"], ip_policy)
+            sub = subnet_api.get_subnet(self.context, sub['id'])
+        yield net, sub, ipp
+
+    def test_allocate_v6_with_mac_fails_policy_raises(self):
+        cidr = netaddr.IPNetwork("fe80::dead:beef/64")
+        allocation_pool = [{"start": cidr[-4], "end": cidr[-2]}]
+        subnet = dict(allocation_pools=allocation_pool,
+                      cidr="fe80::dead:beef/64", ip_version=6,
+                      next_auto_assign_ip=0, tenant_id="fake")
+        subnet = {"subnet": subnet}
+
+        network = dict(name="public", tenant_id="fake", network_plugin="BASE")
+        network = {"network": network}
+
+        ip_policy = {"exclude": ["fe80::dead:beef/64"]}
+        ip_policy = {"ip_policy": ip_policy}
+
+        mac = models.MacAddress()
+        mac["address"] = netaddr.EUI("AA:BB:CC:DD:EE:FF")
+
+        old_override = cfg.CONF.QUARK.v6_allocation_attempts
+        cfg.CONF.set_override('v6_allocation_attempts', 1, 'QUARK')
+
+        with self._stubs(network, subnet, ip_policy) as (net, sub, ipp):
+            with self.assertRaises(n_exc.IpAddressGenerationFailure):
+                self.ipam.allocate_ip_address(self.context, [], net["id"], 0,
+                                              0, subnets=[sub["id"]])
+        cfg.CONF.set_override('v6_allocation_attempts', old_override, 'QUARK')
 
 
 class QuarkIPAddressFindReallocatable(QuarkIpamBaseFunctionalTest):
@@ -182,3 +233,155 @@ class QuarkIPAddressAllocateWithFullSubnetsNotMarkedAsFull(
                 self.assertEqual(available_subnets[0].cidr, "2.2.2.0/30")
                 self.assertEqual(available_subnets[0].next_auto_assign_ip,
                                  netaddr.IPAddress("2.2.2.2").ipv6().value)
+
+
+class QuarkIPAddressReallocateAllocated(QuarkIpamBaseFunctionalTest):
+    @contextlib.contextmanager
+    def _stubs(self, network, subnets, ipam_strategy):
+        self.ipam = ipam_strategy
+        with self.context.session.begin():
+            net_mod = db_api.network_create(self.context, **network)
+            next_ip = []
+            sub_mod = []
+            for sub in subnets:
+                next_ip.append(sub.pop("next_auto_assign_ip", 0))
+                sub["network"] = net_mod
+                sub_mod.append(db_api.subnet_create(self.context, **sub))
+            for sub, ip_next in zip(sub_mod, next_ip):
+                # NOTE(asadoughi): update after cidr constructor has been
+                # invoked
+                db_api.subnet_update(self.context,
+                                     sub,
+                                     next_auto_assign_ip=ip_next)
+        yield net_mod, sub_mod
+        with self.context.session.begin():
+            for sub in sub_mod:
+                db_api.subnet_delete(self.context, sub)
+            db_api.network_delete(self.context, net_mod)
+
+    def test_allocate_ipv4_throws_cannot_reallocate_allocated_ip(self):
+        network = dict(name="public", tenant_id="fake")
+        ipnet = netaddr.IPNetwork("0.0.0.0/24")
+        next_ip = ipnet.ipv6().first + 2
+        subnet = dict(id=1, cidr="0.0.0.0/24", next_auto_assign_ip=next_ip,
+                      ip_policy=None, tenant_id="fake")
+        subnets = [subnet]
+        ipam_strategy = quark.ipam.QuarkIpamANY()
+        with self._stubs(network, subnets, ipam_strategy) as (net, sub):
+            ipaddress = []
+            self.ipam.allocate_ip_address(self.context, ipaddress,
+                                          net["id"], 0, 0)
+            self.assertIsNotNone(ipaddress[0]['id'])
+            self.assertEqual(ipaddress[0]['address'], 281470681743362)
+            self.assertEqual(ipaddress[0]['version'], 4)
+            self.assertEqual(ipaddress[0]['used_by_tenant_id'], "fake")
+            # Attempt to allocate the same IP
+            with self.assertRaises(q_exc.CannotAllocateReallocateableIP):
+                allocated_ip = [ipaddress[0]['address']]
+                self.ipam.allocate_ip_address(self.context, [],
+                                              net["id"], 0, 0,
+                                              ip_addresses=allocated_ip)
+
+    def test_allocate_ipv6_throws_cannot_reallocate_allocated_ip(self):
+        network = dict(name="public", tenant_id="fake")
+        ipnet = netaddr.IPNetwork("0.0.0.0/24")
+        next_ip = ipnet.ipv6().first + 2
+        subnet = dict(id=1, cidr="fe80::dead:beef/64",
+                      next_auto_assign_ip=next_ip,
+                      ip_policy=None, tenant_id="fake")
+        subnets = [subnet]
+        ipam_strategy = quark.ipam.QuarkIpamANY()
+        with self._stubs(network, subnets, ipam_strategy) as (net, sub):
+            ipaddress = []
+            self.ipam.allocate_ip_address(self.context, ipaddress,
+                                          net["id"], 0, 0, version=6)
+            self.assertIsNotNone(ipaddress[0]['id'])
+            self.assertEqual(ipaddress[0]['version'], 6)
+            self.assertEqual(ipaddress[0]['used_by_tenant_id'], "fake")
+            # Attempt to allocate the same IP
+            with self.assertRaises(q_exc.CannotAllocateReallocateableIP):
+                allocated_ip = [ipaddress[0]['address']]
+                self.ipam.allocate_ip_address(self.context, [],
+                                              net["id"], 0, 0,
+                                              ip_addresses=allocated_ip)
+
+    def test_allocate_both_v4_v6_throws_cannot_reallocate_allocated_ip(self):
+        network = dict(name="public", tenant_id="fake")
+        ipnet = netaddr.IPNetwork("0.0.0.0/24")
+        next_ip = ipnet.ipv6().first + 2
+        subnet1 = dict(id=1, cidr="0.0.0.0/24", next_auto_assign_ip=next_ip,
+                       ip_policy=None, tenant_id="fake", version=4)
+        subnet2 = dict(id=2, cidr="fe80::dead:beef/64",
+                       next_auto_assign_ip=next_ip,
+                       ip_policy=None, tenant_id="fake", version=6)
+        subnets = [subnet1, subnet2]
+        ipam_strategy = quark.ipam.QuarkIpamBOTHREQ()
+        with self._stubs(network, subnets, ipam_strategy) as (net, sub):
+            ipaddress = []
+            self.ipam.allocate_ip_address(self.context, ipaddress,
+                                          net["id"], 0, 0, subnets=[1, 2])
+            self.assertEqual(len(ipaddress), 2)
+            for ip in ipaddress:
+                self.assertTrue(ip['version'] in [4, 6])
+                self.assertIsNotNone(ip['id'])
+                self.assertEqual(ip['used_by_tenant_id'], 'fake')
+            # Attempt to allocate the same IP
+            with self.assertRaises(q_exc.CannotAllocateReallocateableIP):
+                allocated_ip = [ip['address_readable'] for ip in ipaddress]
+                self.ipam.allocate_ip_address(self.context, [],
+                                              net["id"], 0, 0,
+                                              ip_addresses=allocated_ip,
+                                              subnets=[1, 2])
+
+
+class QuarkIPAddressReallocateDeallocated(QuarkIpamBaseFunctionalTest):
+    @contextlib.contextmanager
+    def _stubs(self, network, subnets, ipam_strategy):
+        self.ipam = ipam_strategy
+        with self.context.session.begin():
+            net_mod = db_api.network_create(self.context, **network)
+            next_ip = []
+            sub_mod = []
+            for sub in subnets:
+                next_ip.append(sub.pop("next_auto_assign_ip", 0))
+                sub["network"] = net_mod
+                sub_mod.append(db_api.subnet_create(self.context, **sub))
+            for sub, ip_next in zip(sub_mod, next_ip):
+                # NOTE(asadoughi): update after cidr constructor has been
+                # invoked
+                db_api.subnet_update(self.context,
+                                     sub,
+                                     next_auto_assign_ip=ip_next)
+        yield net_mod, sub_mod
+        with self.context.session.begin():
+            for sub in sub_mod:
+                db_api.subnet_delete(self.context, sub)
+            db_api.network_delete(self.context, net_mod)
+
+    def test_allocate_deallocated_ips_ipam_both_req(self):
+        network = dict(name="public", tenant_id="fake")
+        ipnet = netaddr.IPNetwork("0.0.0.0/24")
+        next_ip = ipnet.ipv6().first + 2
+        subnet1 = dict(id=1, cidr="0.0.0.0/24", next_auto_assign_ip=next_ip,
+                       ip_policy=None, tenant_id="fake", version=4)
+        subnet2 = dict(id=2, cidr="fe80::dead:beef/64",
+                       next_auto_assign_ip=next_ip,
+                       ip_policy=None, tenant_id="fake", version=6)
+        subnets = [subnet1, subnet2]
+        ipam_strategy = quark.ipam.QuarkIpamBOTHREQ()
+        with self._stubs(network, subnets, ipam_strategy) as (net, sub):
+            ipaddress = []
+            self.ipam.allocate_ip_address(self.context, ipaddress,
+                                          net["id"], 0, 0, subnets=[1, 2])
+            self.assertEqual(len(ipaddress), 2)
+            for ip in ipaddress:
+                self.assertTrue(ip['version'] in [4, 6])
+                self.assertIsNotNone(ip['id'])
+                self.assertEqual(ip['used_by_tenant_id'], 'fake')
+            # Deallocate both given ip's
+            for ip in ipaddress:
+                self.ipam.deallocate_ip_address(self.context, ip)
+
+            # Now attempt to reallocate
+            self.ipam.allocate_ip_address(self.context, ipaddress,
+                                          net["id"], 0, 0, subnets=[1, 2])
