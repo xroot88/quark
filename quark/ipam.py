@@ -17,7 +17,6 @@
 Quark Pluggable IPAM
 """
 
-from datetime import datetime
 import functools
 import itertools
 import random
@@ -481,7 +480,10 @@ class QuarkIpam(object):
                     port_id=port_id,
                     address_type=kwargs.get('address_type', ip_types.FIXED))
                 address["deallocated"] = 0
-                notify(context, 'ip.add', ipaddress)
+                # alexm: instead of notifying from here we notify from
+                # allocate_ip_address() when it's clear that the IP
+                # allocation was successful
+                # notify(context, 'ip.add', address)
         except db_exception.DBDuplicateEntry:
             raise q_exc.CannotAllocateReallocateableIP(ip_address=next_ip)
         except db_exception.DBError:
@@ -555,7 +557,9 @@ class QuarkIpam(object):
                             version=subnet["ip_version"], network_id=net_id,
                             address_type=kwargs.get('address_type',
                                                     ip_types.FIXED))
-                        notify(context, 'ip.add', ipaddress)
+                        # alexm: need to notify from here because this code
+                        # does not go through the _allocate_from_subnet() path.
+                        notify(context, 'ip.add', address)
                         return address
                 except db_exception.DBDuplicateEntry:
                     # This shouldn't ever happen, since we hold a unique MAC
@@ -603,7 +607,6 @@ class QuarkIpam(object):
                 new_addresses.append(address)
 
         return new_addresses
-
 
     @ipam_logged
     def allocate_ip_address(self, context, new_addresses, net_id, port_id,
@@ -697,6 +700,7 @@ class QuarkIpam(object):
             _try_allocate_ip_address(ipam_log)
 
         if self.is_strategy_satisfied(new_addresses, allocate_complete=True):
+            # Only notify when all went well
             for address in new_addresses:
                 notify(context, 'ip.add', address)
             LOG.info("IPAM for port ID {0} completed with addresses "

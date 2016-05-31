@@ -22,9 +22,6 @@ import sys
 from neutron.common import config
 from neutron import context as neutron_context
 
-from oslo_config import cfg
-from oslo_log import log as logging
-
 from pprint import pprint as pp
 from quark import billing
 from quark.db import models
@@ -32,25 +29,27 @@ from quark.db import models
 
 def main():
     if len(sys.argv) < 3:
-        print 'Usage: {0} hour minute [--notify=true]'.format(sys.argv[0])
-        print 'by default it won\'t notify billing unless \'--notify=true\''
-        print 'is specified'
-        print 'if \'--notify=true\' is not specified, the script prints'
-        print 'the messages to stdout and exits'
-        print 'Ex: "{0} 0 0 --notify=true"'.format(sys.argv[0])
-        print 'for a period starting at midnight and send billing msgs'
+        sys.stderr.write('Usage: {0}'.format(sys.argv[0]))
+        sys.stderr.write(' hour minute [--notify=true]\n')
+        sys.stderr.write('by default it won\'t notify billing unless')
+        sys.stderr.write('\'--notify=true\' is specified')
+        sys.stderr.write('if \'--notify=true\' is not specified,')
+        sys.stderr.write(' the script prints')
+        sys.stderr.write(' the messages to stdout and exits\n')
+        sys.stderr.write('Ex: "{0} 0 0 --notify=true"'.format(sys.argv[0]))
+        sys.stderr.write(' for a period starting at midnight')
+        sys.stderr.write(' and send billing msgs\n')
         return 1
     hour = int(sys.argv[1])
     minute = int(sys.argv[2])
     # Read the config file and get the admin context
-    LOG = logging.getLogger(__name__)
-    CONF = cfg.CONF
     config_opts = ['--config-file', '/etc/neutron/neutron.conf']
     config.init(config_opts)
     config.setup_logging()
     context = neutron_context.get_admin_context()
 
-    ##billing.make_case2(context)
+    # Here one can make case 2 entry in the db
+    # billing.make_case2(context)
 
     # A query to get all IPAddress objects from the db
     query = context.session.query(models.IPAddress)
@@ -65,9 +64,10 @@ def main():
                                                     period_end)
 
     if len(sys.argv) > 3 and sys.argv[3] == '--notify=true':
-        print '==================== Full Day ============================='
+        # '==================== Full Day ============================='
         for ipaddress in full_day_ips:
-            print 'start: {}, end: {}'.format(period_start, period_end)
+            sys.stdout.write('start: {}, end: {}'.format(period_start,
+                                                         period_end))
             payload = billing.build_payload(ipaddress,
                                             'ip.exists',
                                             start_time=period_start,
@@ -75,9 +75,10 @@ def main():
             billing.do_notify(context,
                               'ip.exists',
                               payload)
-        print '==================== Part Day ============================='
+        # '==================== Part Day ============================='
         for ipaddress in partial_day_ips:
-            print 'start: {}, end: {}'.format(period_start, period_end)
+            sys.stdout.write('start: {}, end: {}'.format(period_start,
+                                                         period_end))
             payload = billing.build_payload(ipaddress,
                                             'ip.exists',
                                             start_time=ipaddress.allocated_at,
@@ -86,16 +87,16 @@ def main():
                               'ip.exists',
                               payload)
     else:
-        print 'Case 1 payloads ({}):\n'.format(len(full_day_ips))
+        sys.stdout.write('Case 1 ({}):\n'.format(len(full_day_ips)))
         for ipaddress in full_day_ips:
             pp(billing.build_payload(ipaddress,
                                      'ip.exists',
                                      start_time=period_start,
                                      end_time=period_end))
 
-        print '\n=====================================================\n'
+        sys.stdout.write('\n===============================================\n')
 
-        print 'Case 2 payloads ({}):\n'.format(len(partial_day_ips))
+        sys.stdout.write('Case 2 ({}):\n'.format(len(partial_day_ips)))
         for ipaddress in partial_day_ips:
             pp(billing.build_payload(ipaddress,
                                      'ip.exists',

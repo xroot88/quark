@@ -1,4 +1,4 @@
-# Copyright 2013 Openstack Foundation
+# Copyright 2016 Openstack Foundation
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -43,13 +43,8 @@ NOTE: assumes that the beginning of a billing cycle is midnight.
 """
 
 import datetime
-import sys
-
-from neutron.common import config
 from neutron.common import rpc as n_rpc
-from neutron import context as neutron_context
 
-from oslo_config import cfg
 from oslo_log import log as logging
 
 from sqlalchemy import and_, or_, null
@@ -61,15 +56,17 @@ LOG = logging.getLogger(__name__)
 PUBLIC_NETWORK_ID = u'00000000-0000-0000-0000-000000000000'
 
 EVENT_TYPE_2_CLOUDFEEDS = {
-    'ip.exists':        'USAGE',
-    'ip.add':           'CREATE',
-    'ip.delete':        'DELETE',
-    'ip.associate':     'UP',
-    'ip.disassociate':  'DOWN'
+    'ip.exists': 'USAGE',
+    'ip.add': 'CREATE',
+    'ip.delete': 'DELETE',
+    'ip.associate': 'UP',
+    'ip.disassociate': 'DOWN'
 }
+
 
 def do_notify(context, event_type, payload):
     """Generic Notifier.
+
     Parameters:
         - `context`: session context
         - `event_type`: the event type to report, i.e. ip.usage
@@ -83,6 +80,7 @@ def do_notify(context, event_type, payload):
 
 def notify(context, event_type, ipaddress, send_usage=False):
     """Method to send notifications.
+
     We must send USAGE when a public IPv4 address is deallocated or a FLIP is
     associated.
     Parameters:
@@ -95,7 +93,7 @@ def notify(context, event_type, ipaddress, send_usage=False):
     Notes: this may live in the billing module
     """
     # First record the timestamp of when the notifier was called
-    now = now()
+    ts_now = now()
 
     # Build payloads based on the message type and supply the correct start/end
     # or event times.
@@ -107,11 +105,11 @@ def notify(context, event_type, ipaddress, send_usage=False):
     elif event_type == 'ip.delete':
         payload = build_payload(ipaddress,
                                 event_type,
-                                event_time=now)
+                                event_time=ts_now)
     elif event_type == 'ip.associate':
-        payload = build_payload(ipaddress, event_type, event_time=now)
+        payload = build_payload(ipaddress, event_type, event_time=ts_now)
     elif event_type == 'ip.disassociate':
-        payload = build_payload(ipaddress, event_type, event_time=now)
+        payload = build_payload(ipaddress, event_type, event_time=ts_now)
     else:
         LOG.error('IP_BILL: unknown event_type {}'.format(event_type))
         return
@@ -126,15 +124,17 @@ def notify(context, event_type, ipaddress, send_usage=False):
     # Our billing period is 24 hrs. If the address was allocated after midnight
     # send the start_time as as. If the address was allocated yesterday, then
     # send midnight as the start_time.
+    # Note: if allocated_at is empty we assume today's midnight.
     if send_usage:
-        if ipaddress.allocated_at >= midnight_today():
+        if ipaddress.allocated_at is not None and \
+           ipaddress.allocated_at >= midnight_today():
             start_time = ipaddress.allocated_at
         else:
             start_time = midnight_today()
         payload = build_payload(ipaddress,
                                 'ip.exists',
                                 start_time=start_time,
-                                end_time=now)
+                                end_time=ts_now)
         do_notify(context, 'ip.exists', payload)
 
 
@@ -144,6 +144,7 @@ def build_payload(ipaddress,
                   start_time=None,
                   end_time=None):
     """Method builds a payload out of the passed arguments.
+
     Parameters:
         `ipaddress`: the models.IPAddress object
         `event_type`: USAGE,CREATE,DELETE,SUSPEND,or UNSUSPEND
@@ -161,7 +162,7 @@ def build_payload(ipaddress,
     # This is the common part of all message types
     payload = {
         'event_type': unicode(EVENT_TYPE_2_CLOUDFEEDS[event_type]),
-        'tenant_id': int(ipaddress.used_by_tenant_id),
+        'tenant_id': unicode(ipaddress.used_by_tenant_id),
         'ip_address': unicode(ipaddress.address_readable),
         'subnet_id': unicode(ipaddress.subnet_id),
         'network_id': unicode(ipaddress.network_id),
@@ -174,7 +175,7 @@ def build_payload(ipaddress,
     # Depending on the message type add the appropriate fields
     if event_type == 'ip.exists':
         if start_time is None or end_time is None:
-            raise ValueError('IP_BILL: {} start_time/end_time cannot be empty'\
+            raise ValueError('IP_BILL: {} start_time/end_time cannot be empty'
                              .format(event_type))
         payload.update({
             'startTime': unicode(convert_timestamp(start_time)),
@@ -182,41 +183,29 @@ def build_payload(ipaddress,
         })
     elif event_type == 'ip.add':
         if event_time is None:
-            raise ValueError('IP_BILL: {}: event_time cannot be NULL'\
+            raise ValueError('IP_BILL: {}: event_time cannot be NULL'
                              .format(event_type))
         payload.update({
             'eventTime': unicode(convert_timestamp(event_time)),
         })
     elif event_type == 'ip.delete':
         if event_time is None:
-            raise ValueError('IP_BILL: {}: event_time cannot be NULL'\
+            raise ValueError('IP_BILL: {}: event_time cannot be NULL'
                              .format(event_type))
         payload.update({
             'eventTime': unicode(convert_timestamp(event_time))
         })
     elif event_type == 'ip.associate' or event_type == 'ip.disassociate':
         if event_time is None:
-            raise ValueError('IP_BILL: {}: event_time cannot be NULL'\
+            raise ValueError('IP_BILL: {}: event_time cannot be NULL'
                              .format(event_type))
         # only pass floating ip addresses through this
-        if ipaddress.address_type != 'floating':
-            raise ValueError('IP_BILL: {} only valid for floating IPs'.\
-                            format(event_type))
+        if ipaddress.address_type not in ['floating', 'scaling']:
+            raise ValueError('IP_BILL: {} only valid for floating IPs'.
+                             format(event_type),
+                             ' got {} instead'.format(ipaddress.address_type))
 
-        if event_type == 'ip.associate':
-            if start_time is None:
-                raise ValueError('IP_BILL: start_time is required ' +
-                                 'for ip.associate')
-            payload.update({
-                'eventTime': unicode(convert_timestamp(event_time))
-            })
-        else: # ip.disassociate
-            if end_time is None:
-                raise ValueError('IP_BILL: end_time is required ' +
-                                 'for ip.disassociate')
-            payload.update({
-                'eventTime': unicode(convert_timestamp(event_time))
-            })
+        payload.update({'eventTime': unicode(convert_timestamp(event_time))})
     else:
         raise ValueError('IP_BILL: bad event_type: {}'.format(event_type))
 
@@ -224,52 +213,53 @@ def build_payload(ipaddress,
 
 
 def build_full_day_ips(query, period_start, period_end):
-    """Method to build an IP list for the case 1 when the IP
-    was allocated before the period start and is still allocated
-    after the period end.
+    """Method to build an IP list for the case 1
+
+    when the IP was allocated before the period start
+    and is still allocated after the period end.
     This method only looks at public IPv4 addresses.
     """
-
     # Filter out only IPv4 that have not been deallocated
     ip_list = query.\
-            filter(models.IPAddress.version == 4L).\
-            filter(models.IPAddress.network_id == PUBLIC_NETWORK_ID).\
-            filter(models.IPAddress.used_by_tenant_id != None).\
-            filter(models.IPAddress.allocated_at != null()).\
-            filter(models.IPAddress.allocated_at < period_start).\
-            filter(or_(models.IPAddress._deallocated == False,\
-                       models.IPAddress.deallocated_at >= period_end)).all()
+        filter(models.IPAddress.version == 4L).\
+        filter(models.IPAddress.network_id == PUBLIC_NETWORK_ID).\
+        filter(models.IPAddress.used_by_tenant_id is not None).\
+        filter(models.IPAddress.allocated_at != null()).\
+        filter(models.IPAddress.allocated_at < period_start).\
+        filter(or_(models.IPAddress._deallocated is False,
+                   models.IPAddress.deallocated_at == null(),
+                   models.IPAddress.deallocated_at >= period_end)).all()
 
     return ip_list
 
 
 def build_partial_day_ips(query, period_start, period_end):
-    """Method to build an IP list for the case 2 when the IP
-    was allocated after the period start and is still allocated
-    after the period end.
+    """Method to build an IP list for the case 2
+
+    when the IP was allocated after the period start and
+    is still allocated after the period end.
     This method only looks at public IPv4 addresses.
     """
-
     # Filter out only IPv4 that were allocated after the period start
     # and have not been deallocated before the period end.
     # allocated_at will be set to a date
     ip_list = query.\
-            filter(models.IPAddress.version == 4L).\
-            filter(models.IPAddress.network_id == PUBLIC_NETWORK_ID).\
-            filter(models.IPAddress.used_by_tenant_id != None).\
-            filter(and_(models.IPAddress.allocated_at != null(),\
-                       models.IPAddress.allocated_at >= period_start,\
-                       models.IPAddress.allocated_at < period_end)).\
-            filter(or_(models.IPAddress._deallocated == False,\
-                       models.IPAddress.deallocated_at == null(),\
-                       models.IPAddress.deallocated_at >= period_end)).all()
-
+        filter(models.IPAddress.version == 4L).\
+        filter(models.IPAddress.network_id == PUBLIC_NETWORK_ID).\
+        filter(models.IPAddress.used_by_tenant_id is not None).\
+        filter(and_(models.IPAddress.allocated_at != null(),
+                    models.IPAddress.allocated_at >= period_start,
+                    models.IPAddress.allocated_at < period_end)).\
+        filter(or_(models.IPAddress._deallocated is False,
+                   models.IPAddress.deallocated_at == null(),
+                   models.IPAddress.deallocated_at >= period_end)).all()
 
     return ip_list
 
 
 def calc_periods(hour=0, minute=0):
     """Returns a tuple of start_period and end_period.
+
     Assumes that the period is 24-hrs.
     Parameters:
         - `hour`: the hour from 0 to 23 when the period ends
@@ -303,8 +293,8 @@ def calc_periods(hour=0, minute=0):
 
 
 def midnight_from_datetime(ts):
-    """Finds the midnight for the ts passed
-    """
+    """Finds the midnight for the ts passed"""
+
     return ts.replace(hour=0, minute=0, second=0)
 
 
@@ -313,12 +303,14 @@ def midnight_today():
                                               minute=0,
                                               second=0)
 
+
 def get_start_time(ts):
-    """If ts is after that day's midnight returns ts
+    """Helper method to calculate the period start time.
+
+    If ts is after that day's midnight returns ts
     if ts is prior to that day's midnight returns that day midnight
     We are given a timestamp May 10, 2016, 14:00.
     Period starts at midnight that day, i.e. May 10, 2016, 00:00.
-    
     """
     if ts and ts < midnight_today():
         return ts
@@ -327,14 +319,14 @@ def get_start_time(ts):
 
 
 def get_end_time(ts):
-    """If ts is None, replaces it with utcnow()
-    """
+    """If ts is None, replaces it with utcnow()"""
     return ts if ts is not None else datetime.datetime.utcnow()
 
 
 def seconds_since_midnight(ts):
-    """Helper method to find how many seconds elapsed since midnight
-    that occurred before the timestamp passed.
+    """Helper method to find how many seconds elapsed since midnight.
+
+    Seconds that occurred since midnight till the timestamp ts.
     Parameters:
         - `ts`: timestamp in datetime format
         Returns:
@@ -342,20 +334,28 @@ def seconds_since_midnight(ts):
     """
     return (ts - ts.replace(hour=0, minute=0, second=0)).seconds
 
+
 def make_case2(context):
+    """This is a helper method for testing.
+
+    When run with the current context, it will create a case 2 entries
+    in the database. See top of file for what case 2 is.
+    """
     query = context.session.query(models.IPAddress)
     period_start, period_end = calc_periods()
     ip_list = build_full_day_ips(query, period_start, period_end)
     import random
-    ind = random.randint(0,len(ip_list)-1)
-    print 'using index {}'.format(ind)
+    ind = random.randint(0, len(ip_list) - 1)
     address = ip_list[ind]
-    address.allocated_at = datetime.datetime.utcnow() - datetime.timedelta(days=1)
+    address.allocated_at = datetime.datetime.utcnow() -\
+        datetime.timedelta(days=1)
     context.session.add(address)
     context.session.flush()
 
+
 def convert_timestamp(ts):
     """Converts the timestamp to a format suitable for Billing.
+
     Examples of a good timestamp for startTime, endTime, and eventTime:
         '2016-05-20T00:00:00Z'
     Note the trailing 'Z'. Python does not add the 'Z' so we tack it on
@@ -363,7 +363,7 @@ def convert_timestamp(ts):
     """
     return ts.isoformat() + 'Z'
 
+
 def now():
-    """Method to get the utcnow without microseconds
-    """
+    """Method to get the utcnow without microseconds"""
     return datetime.datetime.utcnow().replace(microsecond=0)
