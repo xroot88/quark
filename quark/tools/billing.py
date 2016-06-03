@@ -24,9 +24,9 @@ from neutron.common import config
 from neutron import context as neutron_context
 
 from pprint import pprint as pp
-from quark.billing import build_full_day_ips
-from quark.billing import calc_periods
+from quark import billing
 from quark.db import models
+from quark import network_strategy
 
 
 def make_case2(context):
@@ -36,8 +36,8 @@ def make_case2(context):
     in the database. See top of file for what case 2 is.
     """
     query = context.session.query(models.IPAddress)
-    period_start, period_end = calc_periods()
-    ip_list = build_full_day_ips(query, period_start, period_end)
+    period_start, period_end = billing.calc_periods()
+    ip_list = billing.build_full_day_ips(query, period_start, period_end)
     import random
     ind = random.randint(0, len(ip_list) - 1)
     address = ip_list[ind]
@@ -48,7 +48,7 @@ def make_case2(context):
 
 
 @click.command()
-@click.option('--notify', default='False',
+@click.option('--notify', is_flag=True,
               help='If true, sends notifications to billing')
 @click.option('--hour', default=0,
               help='period start hour, e.g. 0 is midnight')
@@ -62,7 +62,8 @@ def main(notify, hour, minute):
     config.init(config_opts)
     # Have to load the billing module _after_ config is parsed so
     # that we get the right network strategy
-    from quark import billing
+    network_strategy.STRATEGY.load()
+    billing.PUBLIC_NETWORK_ID = network_strategy.STRATEGY.get_public_net_id()
     config.setup_logging()
     context = neutron_context.get_admin_context()
 
@@ -78,7 +79,7 @@ def main(notify, hour, minute):
                                                     period_start,
                                                     period_end)
 
-    if notify.lower() == 'true':
+    if notify:
         # '==================== Full Day ============================='
         for ipaddress in full_day_ips:
             click.echo('start: {}, end: {}'.format(period_start, period_end))

@@ -25,9 +25,10 @@ from quark.tests import test_base
 class QuarkBillingBaseTest(test_base.TestBase):
     def setUp(self):
         super(QuarkBillingBaseTest, self).setUp()
-        self.strategy = {"public_network": {"bridge": "publicnet",
-                                            "subnets": {"4": "public_v4",
-                                                        "6": "public_v6"}}}
+        self.strategy = {"00000000-0000-0000-0000-000000000000":
+                         {"bridge": "publicnet",
+                          "subnets": {"4": "public_v4",
+                                      "6": "public_v6"}}}
         strategy_json = json.dumps(self.strategy)
         cfg.CONF.set_override("default_net_strategy", strategy_json, "QUARK")
         network_strategy.STRATEGY.load()
@@ -41,7 +42,7 @@ TENANT_ID = u'12345'
 IP_ID = 'ffffffff-dddd-cccc-bbbb-aaaaaaaaaaaa'
 IP_READABLE = '1.1.1.1'
 SUBNET_ID = 'badc0ffe-dead-beef-c0fe-baaaaadc0ded'
-PUB_NETWORK_ID = 'public_network'
+PUB_NETWORK_ID = '00000000-0000-0000-0000-000000000000'
 
 
 def get_fake_fixed_address():

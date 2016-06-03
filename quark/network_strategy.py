@@ -23,7 +23,9 @@ CONF = cfg.CONF
 
 quark_opts = [
     cfg.StrOpt('default_net_strategy', default='{}',
-               help=_("Default network assignment strategy"))
+               help=_("Default network assignment strategy")),
+    cfg.StrOpt('public_net_id', default='00000000-0000-0000-0000-000000000000',
+               help=_("Public network id"))
 ]
 CONF.register_opts(quark_opts, "QUARK")
 
@@ -101,7 +103,7 @@ class JSONStrategy(object):
     def get_public_net_id(self):
         """Returns the public net id"""
         for id, net_params in self.strategy.iteritems():
-            if net_params['bridge'] == 'publicnet':
+            if id == CONF.QUARK.public_net_id:
                 return id
         return None
 
