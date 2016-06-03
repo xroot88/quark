@@ -98,5 +98,12 @@ class JSONStrategy(object):
             return None
         return self.subnet_strategy.get(subnet_id)["network_id"]
 
+    def get_public_net_id(self):
+        """Returns the public net id"""
+        for id, net_params in self.strategy.iteritems():
+            if net_params['bridge'] == 'publicnet':
+                return id
+        return None
+
 
 STRATEGY = JSONStrategy()
